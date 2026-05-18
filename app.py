@@ -13,6 +13,7 @@ import jellyfin
 import log_buffer
 import monitor
 import processor
+import strm_generator
 from config import (
     CATCHUP_ENABLED,
     CLEANUP_INTERVAL_HOURS,
@@ -21,6 +22,7 @@ from config import (
     MERGE_VERSIONS_INTERVAL_HOURS,
     MONITOR_INTERVAL_HOURS,
     MOVIE_SYNC_INTERVAL_MINUTES,
+    STRM_GENERATOR_INTERVAL_HOURS,
     WEBHOOK_SECRET,
     configure_logging,
 )
@@ -63,6 +65,14 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled movie sync every %dm", MOVIE_SYNC_INTERVAL_MINUTES)
 
+    if STRM_GENERATOR_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            strm_generator.run_and_refresh,
+            trigger="interval", hours=STRM_GENERATOR_INTERVAL_HOURS,
+            id="strm_generator", next_run_time=None,
+        )
+        log.info("Scheduled strm generator every %dh", STRM_GENERATOR_INTERVAL_HOURS)
+
     if CLEANUP_INTERVAL_HOURS > 0:
         scheduler.add_job(
             cleanup.run_cleanup,
@@ -80,8 +90,9 @@ scheduler = _start_scheduler()
 if CATCHUP_ENABLED:
     catchup.schedule()
 
-# Kick off initial movie sync shortly after startup
+# Kick off initial movie sync and strm scan shortly after startup
 threading.Thread(target=monitor.sync_movies, name="movie-sync-init", daemon=True).start()
+threading.Thread(target=strm_generator.run_and_refresh, name="strm-init", daemon=True).start()
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────

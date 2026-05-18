@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import db
-import jellyfin
+import strm_generator
 import tmdb
 import torbox
 import torrentio
@@ -208,4 +208,4 @@ def run_cleanup() -> None:
              scanned, repaired, deleted, unfixable)
 
     if tmc_needed:
-        jellyfin.refresh_library()
+        strm_generator.run_and_refresh()

@@ -5,10 +5,11 @@ from typing import Optional
 import db
 import jellyfin
 import monitor
+import strm_generator
 import torbox
 import torrentio
 import zilean
-from config import JELLYFIN_REFRESH_DELAY_SEC, ZILEAN_ENABLED
+from config import ZILEAN_ENABLED
 from torrentio import TorrentioStream
 from webhook_parser import MediaRequest
 
@@ -161,9 +162,10 @@ def process(req: MediaRequest) -> bool:
         )
         if not req.is_movie:
             monitor.add_series(req.imdb_id, req.title, req.seasons)
-        if JELLYFIN_REFRESH_DELAY_SEC > 0:
-            log.info("Waiting %ds for TMC to pick up new content before Jellyfin scan", JELLYFIN_REFRESH_DELAY_SEC)
-            time.sleep(JELLYFIN_REFRESH_DELAY_SEC)
+        item = torbox.find_by_hash(winner.info_hash) if winner else None
+        torrent_id = item.get('id') if item else None
+        if torrent_id:
+            strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type)
         jellyfin.refresh_library()
     else:
         db.update_request(row_id, "failed")

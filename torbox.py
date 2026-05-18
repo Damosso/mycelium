@@ -49,6 +49,13 @@ def find_by_hash(info_hash: str) -> dict | None:
     return None
 
 
+def find_by_id(torrent_id: int) -> dict | None:
+    for item in list_torrents():
+        if item.get('id') == torrent_id:
+            return item
+    return None
+
+
 def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
     """Return the subset of hashes that TorBox has cached (instant download available)."""
     if not hashes:

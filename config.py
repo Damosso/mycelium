@@ -30,9 +30,6 @@ TORRENTIO_OPTS = _env("TORRENTIO_OPTS", "")
 
 JELLYFIN_URL = _env("JELLYFIN_URL", "http://10.0.0.10:8096")
 JELLYFIN_API_KEY = _env("JELLYFIN_API_KEY", "")
-# Seconds to wait after TorBox reports ready before triggering Jellyfin scan.
-# TMC runs every hour and picks up new TorBox content automatically; 300s gives it time.
-JELLYFIN_REFRESH_DELAY_SEC = _env_int("JELLYFIN_REFRESH_DELAY_SEC", 300)
 
 SEERR_URL = _env("SEERR_URL", "http://10.0.0.10:5055")
 SEERR_API_KEY = _env("SEERR_API_KEY", "")
@@ -66,13 +63,12 @@ CATCHUP_ENABLED = _env("CATCHUP_ENABLED", "true").lower() in ("1", "true", "yes"
 CATCHUP_DELAY_SEC = _env_int("CATCHUP_DELAY_SEC", 30)
 CATCHUP_TAKE = _env_int("CATCHUP_TAKE", 20)
 
-# Path where TMC writes .strm files (inside container, mount /data/media there).
 MEDIA_PATH = _env("MEDIA_PATH", "/data/media")
+# strm_generator scans TorBox mylist and creates missing .strm files every N hours.
+STRM_GENERATOR_INTERVAL_HOURS = _env_int("STRM_GENERATOR_INTERVAL_HOURS", 1)
 MONITOR_INTERVAL_HOURS = _env_int("MONITOR_INTERVAL_HOURS", 6)
 MOVIE_SYNC_INTERVAL_MINUTES = _env_int("MOVIE_SYNC_INTERVAL_MINUTES", 30)
 MAX_RETRY_ATTEMPTS = _env_int("MAX_RETRY_ATTEMPTS", 10)
-
-TMC_CONTAINER_NAME = _env("TMC_CONTAINER_NAME", "tmc")
 
 # Automatic Jellyfin merge of duplicate movie versions (every N hours; 0 disables).
 MERGE_VERSIONS_INTERVAL_HOURS = _env_int("MERGE_VERSIONS_INTERVAL_HOURS", 6)
