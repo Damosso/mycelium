@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import requests
 
-from config import ALLOW_4K, QUALITY_PREFERENCE, TORRENTIO_BASE_URL, TORRENTIO_OPTS
+from config import ALLOW_4K, EXCLUDE_REMUX, QUALITY_PREFERENCE, TORRENTIO_BASE_URL, TORRENTIO_OPTS
 
 log = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ _QUALITY_PATTERNS = {
     "480p": re.compile(r"\b480p\b", re.IGNORECASE),
 }
 
+_REMUX_RE = re.compile(r"\b(remux|bluray|blu-ray|bdremux)\b", re.IGNORECASE)
 _SEEDERS_RE = re.compile(r"👤\s*(\d+)")
 _SIZE_RE = re.compile(r"💾\s*([\d.]+)\s*(GB|MB)", re.IGNORECASE)
 _SEASON_PACK_HINTS = ("season", "complete", "s%02d ", "s%02d.")
@@ -133,6 +134,13 @@ def pick_best(
     if not candidates:
         log.warning("No non-4K candidates available; falling back to full list")
         candidates = streams
+
+    if EXCLUDE_REMUX:
+        filtered = [s for s in candidates if not _REMUX_RE.search(f"{s.name} {s.title}")]
+        if filtered:
+            candidates = filtered
+        else:
+            log.warning("Only remux/bluray candidates available; allowing them")
 
     def sort_key(s: TorrentioStream):
         return (
