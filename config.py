@@ -131,7 +131,7 @@ HEALTH_CACHE_SECONDS = _env_int("HEALTH_CACHE_SECONDS", 60)
 
 # ── OpenSubtitles ─────────────────────────────────────────────────────────────
 OPENSUBTITLES_API_KEY = _env("OPENSUBTITLES_API_KEY", "")
-OPENSUBTITLES_USER_AGENT = _env("OPENSUBTITLES_USER_AGENT", "seerr-torbox-webhook v1.0")
+OPENSUBTITLES_USER_AGENT = _env("OPENSUBTITLES_USER_AGENT", "Mycelium v1.0")
 OPENSUBTITLES_LANGUAGES = [l.strip().lower() for l in _env("OPENSUBTITLES_LANGUAGES", "").split(",") if l.strip()]
 
 # ── Continue-watching priority ────────────────────────────────────────────────

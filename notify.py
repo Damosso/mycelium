@@ -53,7 +53,7 @@ def test() -> dict:
         try:
             r = requests.post(
                 discord_url,
-                json={"content": "🧪 Test notification from seerr-torbox-webhook"},
+                json={"content": "🧪 Test notification from Mycelium"},
                 timeout=10,
             )
             results["discord"] = "ok" if r.status_code < 400 else f"http {r.status_code}"

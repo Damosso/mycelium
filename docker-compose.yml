@@ -1,8 +1,8 @@
 services:
-  seerr-torbox-webhook:
+  mycelium:
     build: .
-    image: seerr-torbox-webhook:latest
-    container_name: seerr-torbox-webhook
+    image: mycelium:latest
+    container_name: mycelium
     restart: unless-stopped
     ports:
       - "8088:8088"

@@ -60,10 +60,10 @@ from webhook_parser import IgnoreEvent, MediaRequest, WebhookError, parse
 
 configure_logging()
 log_buffer.install()
-log = logging.getLogger("seerr-torbox")
+log = logging.getLogger("mycelium")
 
 app = Flask(__name__)
-app.secret_key = "seerr-torbox-ui"
+app.secret_key = "mycelium-ui"
 
 db.init()
 
@@ -752,5 +752,5 @@ def ui_show_override_delete(imdb_id: str):
 
 
 if __name__ == "__main__":
-    log.info("Starting seerr-torbox webhook on %s:%d", LISTEN_HOST, LISTEN_PORT)
+    log.info("Starting Mycelium on %s:%d", LISTEN_HOST, LISTEN_PORT)
     app.run(host=LISTEN_HOST, port=LISTEN_PORT)
