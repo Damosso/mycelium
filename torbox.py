@@ -56,6 +56,34 @@ def find_by_id(torrent_id: int) -> dict | None:
     return None
 
 
+def get_user_info(timeout: int = 10) -> dict | None:
+    """Return TorBox user info (subscription, plan, etc) or None on failure."""
+    url = f"{TORBOX_BASE_URL.rstrip('/')}/user/me"
+    try:
+        resp = requests.get(url, headers=_headers(), timeout=timeout)
+        resp.raise_for_status()
+        return (resp.json() or {}).get("data") or {}
+    except Exception as exc:
+        log.debug("TorBox user info failed: %s", exc)
+        return None
+
+
+def get_usage_summary() -> dict:
+    """Derived usage info: torrent count, total bytes, active-state breakdown."""
+    items = list_torrents()
+    total_bytes = sum(t.get("size") or 0 for t in items)
+    states: dict[str, int] = {}
+    for t in items:
+        s = (t.get("download_state") or "unknown").lower()
+        states[s] = states.get(s, 0) + 1
+    return {
+        "torrent_count": len(items),
+        "total_bytes": total_bytes,
+        "total_gb": round(total_bytes / 1e9, 1),
+        "states": states,
+    }
+
+
 def delete_torrent(torrent_id: int, timeout: int = 15) -> bool:
     url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/controltorrent"
     try:

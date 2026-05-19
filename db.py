@@ -104,6 +104,41 @@ CREATE TABLE IF NOT EXISTS failed_hashes (
     created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    dedup_key       TEXT    NOT NULL UNIQUE,
+    received_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS retry_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    imdb_id         TEXT    NOT NULL,
+    title           TEXT    NOT NULL,
+    media_type      TEXT    NOT NULL,
+    seasons         TEXT,
+    attempt         INTEGER NOT NULL DEFAULT 0,
+    next_retry_at   TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS show_quality_override (
+    imdb_id              TEXT    PRIMARY KEY,
+    quality_preference   TEXT,
+    allow_4k             INTEGER,
+    prefer_hevc          INTEGER,
+    notes                TEXT,
+    created_at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS metric_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric        TEXT    NOT NULL,
+    label         TEXT,
+    value_int     INTEGER,
+    value_real    REAL,
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS repair_items (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     cleanup_run_id  INTEGER NOT NULL REFERENCES cleanup_runs(id),
@@ -516,6 +551,134 @@ def clear_failed_hash(info_hash: str) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM failed_hashes WHERE info_hash=?", (info_hash,))
         conn.commit()
+
+
+# ── webhook idempotency ───────────────────────────────────────────────────────
+
+def webhook_seen(dedup_key: str) -> bool:
+    """Record a webhook event; return True if already seen (within DB)."""
+    try:
+        with _connect() as conn:
+            conn.execute("INSERT INTO webhook_events (dedup_key) VALUES (?)", (dedup_key,))
+            conn.commit()
+            return False
+    except Exception:
+        return True
+
+
+def prune_webhook_events(max_age_hours: int = 24) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            f"DELETE FROM webhook_events WHERE received_at < datetime('now','-{max_age_hours} hours')"
+        )
+        conn.commit()
+        return cur.rowcount or 0
+
+
+# ── retry queue ───────────────────────────────────────────────────────────────
+
+def enqueue_retry(imdb_id: str, title: str, media_type: str, seasons: list[int] | None,
+                   attempt: int, delay_seconds: int) -> None:
+    seasons_str = ",".join(str(s) for s in (seasons or []))
+    with _connect() as conn:
+        conn.execute(
+            f"""INSERT INTO retry_queue (imdb_id, title, media_type, seasons, attempt, next_retry_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now','+{delay_seconds} seconds'))""",
+            (imdb_id, title, media_type, seasons_str or None, attempt),
+        )
+        conn.commit()
+
+
+def get_due_retries() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM retry_queue WHERE next_retry_at <= datetime('now') ORDER BY next_retry_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_pending_retries() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM retry_queue ORDER BY next_retry_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def remove_retry(retry_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM retry_queue WHERE id=?", (retry_id,))
+        conn.commit()
+
+
+# ── per-show quality override ─────────────────────────────────────────────────
+
+def upsert_show_override(imdb_id: str, quality_preference: str | None,
+                          allow_4k: bool | None, prefer_hevc: bool | None,
+                          notes: str | None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO show_quality_override (imdb_id, quality_preference, allow_4k, prefer_hevc, notes)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(imdb_id) DO UPDATE SET
+                 quality_preference=excluded.quality_preference,
+                 allow_4k=excluded.allow_4k,
+                 prefer_hevc=excluded.prefer_hevc,
+                 notes=excluded.notes""",
+            (imdb_id, quality_preference,
+             None if allow_4k is None else int(allow_4k),
+             None if prefer_hevc is None else int(prefer_hevc),
+             notes),
+        )
+        conn.commit()
+
+
+def get_show_override(imdb_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM show_quality_override WHERE imdb_id=?", (imdb_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_all_show_overrides() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM show_quality_override ORDER BY imdb_id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_show_override(imdb_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM show_quality_override WHERE imdb_id=?", (imdb_id,))
+        conn.commit()
+
+
+# ── metrics ───────────────────────────────────────────────────────────────────
+
+def record_metric(metric: str, label: str | None = None,
+                   value_int: int | None = None, value_real: float | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO metric_events (metric, label, value_int, value_real) VALUES (?, ?, ?, ?)",
+            (metric, label, value_int, value_real),
+        )
+        conn.commit()
+
+
+def get_metric_summary(metric: str, days: int = 30) -> list[dict]:
+    """Aggregate counts per label over the last N days."""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""SELECT label, COUNT(*) as count, AVG(value_real) as avg_real,
+                       SUM(value_int) as sum_int
+                FROM metric_events
+                WHERE metric=? AND created_at > datetime('now','-{days} days')
+                GROUP BY label ORDER BY count DESC""",
+            (metric,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_repair_items(limit: int = 200) -> list[dict]:

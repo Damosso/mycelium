@@ -4,6 +4,7 @@ from typing import Optional
 
 import blacklist
 import db
+import health_cache
 import jellyfin
 import monitor
 import notify
@@ -23,25 +24,31 @@ def _rank(streams, prefer_season_pack: bool = False):
 
 
 def _fetch_movie_candidates(req: MediaRequest) -> list:
-    if ZILEAN_ENABLED:
+    if ZILEAN_ENABLED and health_cache.is_up("zilean"):
         streams = zilean.fetch_streams(req.imdb_id)
         candidates = _rank(streams)
         if candidates:
             log.info("Zilean found %d candidate(s) for movie %s", len(candidates), req.title)
             return candidates
         log.info("Zilean: no candidates for %s; falling back to Torrentio", req.title)
+    if not health_cache.is_up("torrentio"):
+        log.warning("Torrentio appears down; no candidates")
+        return []
     streams = torrentio.fetch_streams("movie", req.imdb_id)
     return _rank(streams)
 
 
 def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefer_season_pack: bool = False) -> list:
-    if ZILEAN_ENABLED:
+    if ZILEAN_ENABLED and health_cache.is_up("zilean"):
         streams = zilean.fetch_streams(req.imdb_id, season=season, episode=episode)
         candidates = _rank(streams, prefer_season_pack=prefer_season_pack)
         if candidates:
             log.info("Zilean found %d candidate(s) for %s S%02dE%02d", len(candidates), req.title, season, episode)
             return candidates
         log.info("Zilean: no candidates for %s S%02dE%02d; falling back to Torrentio", req.title, season, episode)
+    if not health_cache.is_up("torrentio"):
+        log.warning("Torrentio appears down; no candidates")
+        return []
     streams = torrentio.fetch_streams("series", req.imdb_id, season=season, episode=episode)
     return _rank(streams, prefer_season_pack=prefer_season_pack)
 
@@ -142,8 +149,10 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
     return added > 0, first_winner
 
 
-def process(req: MediaRequest) -> bool:
-    log.info("Processing request: %s [%s] %s", req.title, req.media_type, req.imdb_id)
+def process(req: MediaRequest, _retry_attempt: int = 0) -> bool:
+    log.info("Processing request: %s [%s] %s (attempt %d)",
+             req.title, req.media_type, req.imdb_id, _retry_attempt)
+    started = time.monotonic()
     row_id = db.insert_request(req.title, req.imdb_id, req.media_type, req.seasons)
     success = False
     winner: Optional[TorrentioStream] = None
@@ -159,6 +168,8 @@ def process(req: MediaRequest) -> bool:
     except Exception as exc:
         log.exception("Unexpected error processing %s", req.title)
         db.update_request(row_id, "failed", error=str(exc))
+        import retry_queue
+        retry_queue.schedule(req, _retry_attempt)
         return False
 
     if success:
@@ -178,10 +189,20 @@ def process(req: MediaRequest) -> bool:
         quality = winner.quality if winner else "?"
         db.log_activity("added", req.title, f"{req.media_type} · {quality}", True)
         notify.send(f"Added: {req.title}", f"{req.media_type} · {quality} · {req.imdb_id}", True)
+        # Metrics
+        elapsed = time.monotonic() - started
+        db.record_metric("latency_seconds", req.media_type, value_real=elapsed)
+        if winner:
+            db.record_metric("quality_added", winner.quality, value_int=1)
+            source = (winner.name.split()[0] if winner.name else "?").lower()
+            db.record_metric("source_win", source, value_int=1)
     else:
         db.update_request(row_id, "failed")
         log.warning("No content added; skipping Jellyfin refresh for %s", req.title)
         db.log_activity("failed", req.title, f"no suitable stream found for {req.imdb_id}", False)
         notify.send(f"Failed: {req.title}", f"No suitable stream found · {req.imdb_id}", False)
+        db.record_metric("request_failed", req.media_type, value_int=1)
+        import retry_queue
+        retry_queue.schedule(req, _retry_attempt)
 
     return success

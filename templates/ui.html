@@ -220,6 +220,7 @@
     <button class="tab-btn" data-tab="search">Search</button>
     <button class="tab-btn" data-tab="torbox">TorBox</button>
     <button class="tab-btn" data-tab="catbox">Catbox</button>
+    <button class="tab-btn" data-tab="overrides">Overrides</button>
     <button class="tab-btn" data-tab="blacklist">Blacklist</button>
     <button class="tab-btn" data-tab="repair">Repair</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
@@ -236,6 +237,24 @@
         <div class="stat-sub" id="ov-success-sub"></div></div>
     </div>
 
+    <div class="section-hdr" style="margin-bottom:12px">
+      <span class="section-title">Maintenance Actions</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <form method="post" action="/ui/auto-upgrade" style="display:inline">
+          <button class="btn btn-secondary btn-sm">⬆ Auto-upgrade</button>
+        </form>
+        <form method="post" action="/ui/pack-consolidate" style="display:inline">
+          <button class="btn btn-secondary btn-sm">📦 Consolidate packs</button>
+        </form>
+        <form method="post" action="/ui/trending-now" style="display:inline">
+          <button class="btn btn-secondary btn-sm">🔥 Pre-cache trending</button>
+        </form>
+        <form method="post" action="/ui/sync-movies" style="display:inline">
+          <button class="btn btn-secondary btn-sm">↻ Sync Seerr</button>
+        </form>
+      </div>
+    </div>
+
     <div class="grid-2">
       <div class="card">
         <div class="card-title">Service Health</div>
@@ -244,6 +263,28 @@
       <div class="card">
         <div class="card-title">Quality Distribution</div>
         <div id="quality-bars" class="quality-bars"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">TorBox Usage</div>
+        <div id="torbox-usage"><div class="dim" style="font-size:12px">Loading…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Performance Metrics (30d)</div>
+        <div id="metrics-summary"><div class="dim" style="font-size:12px">Loading…</div></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Retry Queue</div>
+        <div id="retry-list"><div class="dim" style="font-size:12px">Loading…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Source Win Rate</div>
+        <div id="source-bars" class="quality-bars"><div class="dim" style="font-size:12px">No data yet</div></div>
       </div>
     </div>
 
@@ -498,6 +539,41 @@
     </div>
   </div>
 
+  <!-- ── Overrides ── -->
+  <div id="tab-overrides" class="tab-pane">
+    <div class="card">
+      <div class="card-title">Add / Update Show Override</div>
+      <p class="dim" style="font-size:12px;margin-bottom:10px">
+        Override global quality settings for a specific IMDB ID. Leave a field blank to inherit the global default.
+      </p>
+      <form method="post" action="/ui/show-override">
+        <div class="form-row">
+          <div class="field"><label>IMDB ID</label><input name="imdb_id" placeholder="tt0903747" required pattern="tt\d{6,10}"></div>
+          <div class="field"><label>Quality pref</label>
+            <input name="quality_preference" placeholder="2160p,1080p,720p" style="width:180px"></div>
+          <div class="field"><label>Allow 4K</label>
+            <select name="allow_4k"><option value="">inherit</option><option value="true">yes</option><option value="false">no</option></select>
+          </div>
+          <div class="field"><label>Prefer HEVC</label>
+            <select name="prefer_hevc"><option value="">inherit</option><option value="true">yes</option><option value="false">no</option></select>
+          </div>
+          <div class="field" style="flex:1"><label>Notes</label><input name="notes" placeholder="e.g. always 4K, hates remux" style="min-width:180px;width:100%"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn btn-primary">Save</button></div>
+        </div>
+      </form>
+    </div>
+
+    <div class="section-hdr" style="margin-top:16px"><span class="section-title">Active Overrides</span></div>
+    <div class="table-wrap">
+      <table id="overrides-table">
+        <thead><tr>
+          <th>IMDB</th><th>Quality</th><th>4K</th><th>HEVC</th><th>Notes</th><th></th>
+        </tr></thead>
+        <tbody id="overrides-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── Blacklist ── -->
   <div id="tab-blacklist" class="tab-pane">
     <div class="section-hdr">
@@ -606,6 +682,7 @@
     if (name === 'overview') refreshOverview();
     if (name === 'catbox') refreshCatbox();
     if (name === 'blacklist') refreshBlacklist();
+    if (name === 'overrides') refreshOverrides();
   }
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.dataset.tab));
@@ -760,6 +837,92 @@
       });
       if (!d.folders.length) list.innerHTML = '<div class="dim" style="font-size:12px">Empty</div>';
     } catch(e) {}
+
+    // TorBox usage
+    try {
+      const r = await fetch('/ui/api/torbox-usage');
+      const d = await r.json();
+      const el = document.getElementById('torbox-usage');
+      const states = Object.entries(d.usage.states || {})
+        .map(([s, n]) => `<span class="badge badge-${s}">${s} ${n}</span>`).join(' ');
+      el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
+        <div><div class="stat-val" style="font-size:18px">${d.usage.torrent_count}</div><div class="stat-lbl">Torrents</div></div>
+        <div><div class="stat-val" style="font-size:18px">${d.usage.total_gb} GB</div><div class="stat-lbl">Total Size</div></div>
+        ${d.plan ? `<div><div class="stat-val" style="font-size:18px">${d.plan}</div><div class="stat-lbl">Plan</div></div>` : ''}
+      </div><div style="display:flex;gap:6px;flex-wrap:wrap">${states}</div>`;
+    } catch(e) {}
+
+    // Metrics summary
+    try {
+      const r = await fetch('/ui/api/metrics-summary');
+      const d = await r.json();
+      const el = document.getElementById('metrics-summary');
+      const lat = (d.latency || []).find(m => m.label === 'movie') || (d.latency || [])[0];
+      const totalAdded = (d.quality || []).reduce((a, m) => a + (m.count || 0), 0);
+      const totalFailed = (d.failures || []).reduce((a, m) => a + (m.count || 0), 0);
+      el.innerHTML = `
+        <div style="display:flex;gap:18px;flex-wrap:wrap">
+          <div><div class="stat-val" style="font-size:18px">${lat ? lat.avg_real.toFixed(1) + 's' : '—'}</div><div class="stat-lbl">Avg latency</div></div>
+          <div><div class="stat-val" style="font-size:18px">${totalAdded}</div><div class="stat-lbl">Added</div></div>
+          <div><div class="stat-val" style="font-size:18px;color:var(--red)">${totalFailed}</div><div class="stat-lbl">Failed</div></div>
+        </div>`;
+      // Source win rate bars
+      const sourceEl = document.getElementById('source-bars');
+      const sources = d.sources || [];
+      if (sources.length) {
+        const max = Math.max(...sources.map(s => s.count), 1);
+        sourceEl.innerHTML = sources.map(s => {
+          const pct = (100 * s.count / max).toFixed(0);
+          return `<div class="quality-bar-row">
+            <div class="quality-label">${s.label || '?'}</div>
+            <div class="quality-bar-bg"><div class="quality-bar-fill" style="width:${pct}%"></div></div>
+            <div class="quality-count">${s.count}</div></div>`;
+        }).join('');
+      }
+    } catch(e) {}
+
+    // Retry queue
+    try {
+      const r = await fetch('/ui/api/retry-queue');
+      const d = await r.json();
+      const el = document.getElementById('retry-list');
+      if (!d.items.length) {
+        el.innerHTML = '<div class="dim" style="font-size:12px">No pending retries</div>';
+      } else {
+        el.innerHTML = d.items.slice(0, 10).map(i =>
+          `<div class="activity-item">
+            <span class="activity-time">${(i.next_retry_at||'').slice(0,16)}</span>
+            <span class="activity-icon">⏳</span>
+            <span class="activity-text"><b>${i.title}</b> <span class="dim">attempt ${i.attempt}</span></span>
+          </div>`).join('');
+      }
+    } catch(e) {}
+  }
+
+  // ── Overrides ──
+  async function refreshOverrides() {
+    const body = document.getElementById('overrides-body');
+    body.innerHTML = '<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    try {
+      const r = await fetch('/ui/api/show-overrides');
+      const d = await r.json();
+      body.innerHTML = '';
+      d.items.forEach(o => {
+        body.innerHTML += `<tr>
+          <td><a href="https://www.imdb.com/title/${o.imdb_id}" target="_blank">${o.imdb_id}</a></td>
+          <td class="mono">${o.quality_preference || '—'}</td>
+          <td class="dim">${o.allow_4k === null ? '—' : (o.allow_4k ? 'yes' : 'no')}</td>
+          <td class="dim">${o.prefer_hevc === null ? '—' : (o.prefer_hevc ? 'yes' : 'no')}</td>
+          <td class="dim" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.notes || '—'}</td>
+          <td><form method="post" action="/ui/show-override-delete/${o.imdb_id}" style="display:inline">
+            <button class="btn btn-sm btn-danger">Clear</button>
+          </form></td>
+        </tr>`;
+      });
+      if (!d.items.length) body.innerHTML = '<tr><td colspan="6" class="empty">No overrides yet</td></tr>';
+    } catch(e) {
+      body.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
+    }
   }
 
   // ── Activity toasts ──

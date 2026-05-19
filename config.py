@@ -103,6 +103,30 @@ CATBOX_GC_INTERVAL_MINUTES = _env_int("CATBOX_GC_INTERVAL_MINUTES", 10)
 # ── DB backup ─────────────────────────────────────────────────────────────────
 BACKUP_INTERVAL_HOURS = _env_int("BACKUP_INTERVAL_HOURS", 24)
 
+# ── Retry backoff ─────────────────────────────────────────────────────────────
+# Schedule failed requests for retry on exponential backoff (minutes).
+RETRY_BACKOFF_MINUTES = [int(x) for x in _env("RETRY_BACKOFF_MINUTES", "60,360,1440").split(",") if x.strip()]
+RETRY_QUEUE_INTERVAL_MINUTES = _env_int("RETRY_QUEUE_INTERVAL_MINUTES", 15)
+
+# ── Auto-upgrade ──────────────────────────────────────────────────────────────
+# Periodically check for higher-quality cached releases and upgrade existing strm.
+AUTO_UPGRADE_ENABLED = _env("AUTO_UPGRADE_ENABLED", "true").lower() in ("1", "true", "yes")
+AUTO_UPGRADE_INTERVAL_HOURS = _env_int("AUTO_UPGRADE_INTERVAL_HOURS", 24)
+
+# ── Season pack consolidation ─────────────────────────────────────────────────
+# When a season is complete, try to swap N per-episode torrents for 1 season pack.
+SEASON_PACK_CONSOLIDATION_ENABLED = _env("SEASON_PACK_CONSOLIDATION_ENABLED", "true").lower() in ("1","true","yes")
+SEASON_PACK_CHECK_INTERVAL_HOURS = _env_int("SEASON_PACK_CHECK_INTERVAL_HOURS", 12)
+
+# ── Trending pre-cache ────────────────────────────────────────────────────────
+# Auto-add TMDB trending movies if cached on TorBox. 0 disables.
+TRENDING_PRECACHE_COUNT = _env_int("TRENDING_PRECACHE_COUNT", 0)
+TRENDING_CHECK_INTERVAL_HOURS = _env_int("TRENDING_CHECK_INTERVAL_HOURS", 24)
+
+# ── Health-aware processing ───────────────────────────────────────────────────
+# Cache health status for this many seconds; skip services that recently failed.
+HEALTH_CACHE_SECONDS = _env_int("HEALTH_CACHE_SECONDS", 60)
+
 
 def configure_logging() -> None:
     logging.basicConfig(

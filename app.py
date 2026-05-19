@@ -17,13 +17,18 @@ import log_buffer
 import monitor
 import notify
 import processor
+import retry_queue
 import stats
 import strm_generator
 import tmdb
 import torbox
 import torrentio
+import trending
+import upgrader
 import zilean
 from config import (
+    AUTO_UPGRADE_ENABLED,
+    AUTO_UPGRADE_INTERVAL_HOURS,
     BACKUP_INTERVAL_HOURS,
     CATBOX_GC_INTERVAL_MINUTES,
     CATBOX_MODE,
@@ -34,7 +39,12 @@ from config import (
     MERGE_VERSIONS_INTERVAL_HOURS,
     MONITOR_INTERVAL_HOURS,
     MOVIE_SYNC_INTERVAL_MINUTES,
+    RETRY_QUEUE_INTERVAL_MINUTES,
+    SEASON_PACK_CHECK_INTERVAL_HOURS,
+    SEASON_PACK_CONSOLIDATION_ENABLED,
     STRM_GENERATOR_INTERVAL_HOURS,
+    TRENDING_CHECK_INTERVAL_HOURS,
+    TRENDING_PRECACHE_COUNT,
     WEBHOOK_SECRET,
     configure_logging,
 )
@@ -110,6 +120,39 @@ def _start_scheduler() -> BackgroundScheduler:
         )
         log.info("Scheduled DB backup every %dh", BACKUP_INTERVAL_HOURS)
 
+    if RETRY_QUEUE_INTERVAL_MINUTES > 0:
+        scheduler.add_job(
+            retry_queue.run_due,
+            trigger="interval", minutes=RETRY_QUEUE_INTERVAL_MINUTES,
+            id="retry_queue", next_run_time=None,
+        )
+        log.info("Scheduled retry queue every %dm", RETRY_QUEUE_INTERVAL_MINUTES)
+
+    if AUTO_UPGRADE_ENABLED and AUTO_UPGRADE_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            upgrader.run_auto_upgrade,
+            trigger="interval", hours=AUTO_UPGRADE_INTERVAL_HOURS,
+            id="auto_upgrade", next_run_time=None,
+        )
+        log.info("Scheduled auto-upgrade every %dh", AUTO_UPGRADE_INTERVAL_HOURS)
+
+    if SEASON_PACK_CONSOLIDATION_ENABLED and SEASON_PACK_CHECK_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            upgrader.run_pack_consolidation,
+            trigger="interval", hours=SEASON_PACK_CHECK_INTERVAL_HOURS,
+            id="pack_consolidation", next_run_time=None,
+        )
+        log.info("Scheduled season-pack consolidation every %dh", SEASON_PACK_CHECK_INTERVAL_HOURS)
+
+    if TRENDING_PRECACHE_COUNT > 0 and TRENDING_CHECK_INTERVAL_HOURS > 0:
+        scheduler.add_job(
+            trending.run,
+            trigger="interval", hours=TRENDING_CHECK_INTERVAL_HOURS,
+            id="trending_precache", next_run_time=None,
+        )
+        log.info("Scheduled trending pre-cache every %dh (top %d)",
+                 TRENDING_CHECK_INTERVAL_HOURS, TRENDING_PRECACHE_COUNT)
+
     scheduler.start()
     return scheduler
 
@@ -157,6 +200,12 @@ def webhook():
         log.error("Bad webhook payload: %s", exc)
         return jsonify(status="error", error=str(exc)), 400
 
+    # Idempotency: dedup by imdb_id + media_type + seasons within DB
+    dedup_key = f"{media_request.imdb_id}:{media_request.media_type}:{','.join(map(str, media_request.seasons))}"
+    if db.webhook_seen(dedup_key):
+        log.info("Webhook duplicate ignored: %s", dedup_key)
+        return jsonify(status="duplicate", imdb_id=media_request.imdb_id), 200
+
     thread = threading.Thread(
         target=processor.process,
         args=(media_request,),
@@ -165,6 +214,16 @@ def webhook():
     )
     thread.start()
     return jsonify(status="accepted", imdb_id=media_request.imdb_id, title=media_request.title), 202
+
+
+@app.post("/torbox-webhook")
+def torbox_webhook():
+    """Endpoint for TorBox to push completion notifications.
+    Triggers strm_generator to catch the newly-ready torrent."""
+    payload = request.get_json(silent=True) or {}
+    log.info("TorBox webhook: %s", payload)
+    threading.Thread(target=strm_generator.run_and_refresh, name="torbox-push", daemon=True).start()
+    return jsonify(status="ok")
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -452,6 +511,82 @@ def ui_backup_now():
     threading.Thread(target=backup.run, name="backup-manual", daemon=True).start()
     flash("DB backup started", "ok")
     return redirect(url_for("ui_dashboard"))
+
+
+# ── Upgrader / consolidation / trending triggers ──────────────────────────────
+
+@app.post("/ui/auto-upgrade")
+def ui_auto_upgrade():
+    threading.Thread(target=upgrader.run_auto_upgrade, name="upgrade-manual", daemon=True).start()
+    flash("Auto-upgrade scan started", "ok")
+    return redirect(url_for("ui_dashboard") + "#overview")
+
+
+@app.post("/ui/pack-consolidate")
+def ui_pack_consolidate():
+    threading.Thread(target=upgrader.run_pack_consolidation, name="pack-manual", daemon=True).start()
+    flash("Season-pack consolidation started", "ok")
+    return redirect(url_for("ui_dashboard") + "#overview")
+
+
+@app.post("/ui/trending-now")
+def ui_trending_now():
+    threading.Thread(target=trending.run, name="trending-manual", daemon=True).start()
+    flash("Trending pre-cache started", "ok")
+    return redirect(url_for("ui_dashboard") + "#overview")
+
+
+# ── Retry queue + show overrides + metrics + TorBox usage ─────────────────────
+
+@app.get("/ui/api/retry-queue")
+def ui_api_retry_queue():
+    return jsonify(items=db.get_pending_retries())
+
+
+@app.get("/ui/api/torbox-usage")
+def ui_api_torbox_usage():
+    summary = torbox.get_usage_summary()
+    user = torbox.get_user_info() or {}
+    return jsonify(usage=summary, plan=user.get("plan") if isinstance(user, dict) else None)
+
+
+@app.get("/ui/api/metrics-summary")
+def ui_api_metrics_summary():
+    return jsonify(
+        quality=db.get_metric_summary("quality_added", days=30),
+        sources=db.get_metric_summary("source_win", days=30),
+        latency=db.get_metric_summary("latency_seconds", days=30),
+        failures=db.get_metric_summary("request_failed", days=30),
+    )
+
+
+@app.get("/ui/api/show-overrides")
+def ui_api_show_overrides():
+    return jsonify(items=db.get_all_show_overrides())
+
+
+@app.post("/ui/show-override")
+def ui_show_override():
+    imdb_id = (request.form.get("imdb_id") or "").strip()
+    if not re.fullmatch(r"tt\d{6,10}", imdb_id):
+        flash("Invalid IMDB ID", "err")
+        return redirect(url_for("ui_dashboard") + "#overrides")
+    quality = request.form.get("quality_preference") or None
+    allow_4k_raw = request.form.get("allow_4k")
+    prefer_hevc_raw = request.form.get("prefer_hevc")
+    allow_4k = None if not allow_4k_raw else allow_4k_raw == "true"
+    prefer_hevc = None if not prefer_hevc_raw else prefer_hevc_raw == "true"
+    notes = request.form.get("notes") or None
+    db.upsert_show_override(imdb_id, quality, allow_4k, prefer_hevc, notes)
+    flash(f"Saved override for {imdb_id}", "ok")
+    return redirect(url_for("ui_dashboard") + "#overrides")
+
+
+@app.post("/ui/show-override-delete/<imdb_id>")
+def ui_show_override_delete(imdb_id: str):
+    db.delete_show_override(imdb_id)
+    flash(f"Cleared override for {imdb_id}", "ok")
+    return redirect(url_for("ui_dashboard") + "#overrides")
 
 
 if __name__ == "__main__":
