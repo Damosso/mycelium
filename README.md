@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="myc3l1um — the hidden network beneath your media library" width="800"/>
+<img src="assets/banner.svg" alt="myc3l1um: the hidden network beneath your media library" width="800"/>
 
 <p>
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12"/>
@@ -13,7 +13,7 @@
 
 <p>
   Self-hosted automation that turns <a href="https://jellyseerr.dev">Seerr</a> requests into
-  Jellyfin-ready streams via <a href="https://torbox.app">TorBox</a> — in&nbsp;~30&nbsp;seconds, with zero local storage.
+  Jellyfin-ready streams via <a href="https://torbox.app">TorBox</a> in about 30 seconds, with zero local storage.
 </p>
 
 <p>
@@ -49,11 +49,11 @@ Built for the **Jellyfin + TorBox + Synology NAS** stack. No FUSE, no rclone, no
 <details open>
 <summary><b>Core pipeline</b></summary>
 
-- 🪝 **Seerr webhook integration** — every approved request auto-processed
-- 🔎 **Zilean (local) + Torrentio (fallback)** with health-aware skipping
-- ⚡ **TorBox cache-first** strategy with 429 retry + per-hash blacklist
-- 📝 **Jellyfin-friendly naming** — `Movie (Year)/Movie (Year).strm`, `Series/Season XX/Series S01E01.strm`
-- 🎬 **Automatic library refresh**
+- 🪝 **Seerr webhook integration**. Every approved request gets auto-processed.
+- 🔎 **Zilean (local) + Torrentio (fallback)** with health-aware skipping.
+- ⚡ **TorBox cache-first** strategy with 429 retry and per-hash blacklist.
+- 📝 **Jellyfin-friendly naming**: `Movie (Year)/Movie (Year).strm`, `Series/Season XX/Series S01E01.strm`.
+- 🎬 **Automatic library refresh**.
 
 </details>
 
@@ -81,41 +81,41 @@ sequenceDiagram
 <details>
 <summary><b>🎯 Smart picks</b></summary>
 
-- **Per-show overrides** — per-IMDB quality / 4K / HEVC preferences
-- **Audio language preference** — boosts releases matching your language(s)
-- **Auto-upgrade** — replaces 720p with cached 1080p / 2160p when available
-- **Season-pack consolidation** — swaps *N* per-episode torrents for 1 cached pack
-- **Trending pre-cache** — TMDB top-N auto-adds if already cached
-- **Trailer detection** — never accidentally plays the sample MP4
+- **Per-show overrides**: per-IMDB quality, 4K and HEVC preferences.
+- **Audio language preference**: boosts releases matching your language(s).
+- **Auto-upgrade**: replaces 720p with cached 1080p or 2160p when available.
+- **Season-pack consolidation**: swaps *N* per-episode torrents for one cached pack.
+- **Trending pre-cache**: TMDB top-N auto-adds if already cached.
+- **Trailer detection**: never accidentally plays the sample MP4.
 
 </details>
 
 <details>
 <summary><b>🛡 Robustness</b></summary>
 
-- SQLite **WAL mode** + integrity check on startup, weekly `VACUUM`
-- **Per-IMDB mutex** prevents double-processing
-- **Failed-hash blacklist** after *N* retries
-- **Smart retry backoff** (60m / 6h / 24h)
-- **Self-healing** strm probe + cleanup task
-- **Watchdog** — deadman switch (no activity in 24h) + disk-space alerts
-- **Daily DB backup** (14 retained)
-- **Recovery wizard** — one-button repair pipeline
-- **Library import** — rebuild DB from `.strm` files after disaster
-- **Docker healthcheck** wired to `/health` → Synology auto-restart
+- SQLite **WAL mode** plus integrity check on startup, weekly `VACUUM`.
+- **Per-IMDB mutex** prevents double-processing.
+- **Failed-hash blacklist** after *N* retries.
+- **Smart retry backoff** (60m / 6h / 24h).
+- **Self-healing** strm probe and cleanup task.
+- **Watchdog**: deadman switch (no activity in 24h) and disk-space alerts.
+- **Daily DB backup**, 14 retained.
+- **Recovery wizard**: one-button repair pipeline.
+- **Library import**: rebuild DB from `.strm` files after disaster.
+- **Docker healthcheck** wired to `/health` so Synology auto-restarts on issues.
 
 </details>
 
 <details>
 <summary><b>🖥 UX</b></summary>
 
-- Polished dashboard at `/ui` — 11 tabs, sortable tables, TMDB posters, dark/light theme
-- **Manual search & pick** — see every Zilean/Torrentio candidate, pick exactly which to add
-- **Runtime settings** — toggle Catbox mode, quality filters, etc. without restart
-- **Live stats** — quality distribution, source win-rate, latency, retry queue, library orphans
-- **Service health** dots in topbar
-- **Discord + Telegram** notifications on success / failure / disk / deadman
-- Keyboard shortcuts `1` – `9`, `0`
+- Polished dashboard at `/ui`: 11 tabs, sortable tables, TMDB posters, dark/light theme.
+- **Manual search & pick**: see every Zilean/Torrentio candidate, pick exactly which to add.
+- **Runtime settings**: toggle Catbox mode, quality filters, etc. without restart.
+- **Live stats**: quality distribution, source win-rate, latency, retry queue, library orphans.
+- **Service health** dots in topbar.
+- **Discord + Telegram** notifications on success, failure, disk, deadman.
+- Keyboard shortcuts `1` to `9`, `0`.
 
 </details>
 
@@ -128,7 +128,7 @@ sequenceDiagram
 | `POST /torbox-webhook` | TorBox push (skip polling) |
 | OpenSubtitles | Auto `.srt` per language (optional) |
 | Continue Watching | Prioritize next episodes via Jellyfin Resume API |
-| RealDebrid scaffolding | Multi-debrid framework (informational today) |
+| RealDebrid | Multi-debrid fallback (movies + season packs) |
 
 </details>
 
@@ -142,12 +142,12 @@ sequenceDiagram
 - [Jellyseerr](https://jellyseerr.dev) / [Overseerr](https://overseerr.dev) running
 - [Jellyfin](https://jellyfin.org) running
 
-That's it — out of the box Mycelium uses [Torrentio](https://torrentio.strem.fun) for scraping, which is a public service with no self-hosting required.
+That's it. Out of the box Mycelium uses [Torrentio](https://torrentio.strem.fun) for scraping, which is a public service with no self-hosting required.
 
 **Optional add-ons** (you don't need any of these to get started):
-- [Zilean](https://github.com/iPromKnight/zilean) — self-hosted local hash index, tried before Torrentio for faster + private search
-- [RealDebrid](https://real-debrid.com) — alternative debrid as fallback for cases where TorBox doesn't have a release cached
-- [OpenSubtitles](https://www.opensubtitles.com/en/consumers) API key — auto subtitle download
+- [Zilean](https://github.com/iPromKnight/zilean): self-hosted local hash index, tried before Torrentio for faster and private search.
+- [RealDebrid](https://real-debrid.com): alternative debrid as fallback when TorBox doesn't have a release cached.
+- [OpenSubtitles](https://www.opensubtitles.com/en/consumers) API key: auto subtitle download.
 
 ### Install
 
@@ -168,11 +168,11 @@ Open the dashboard at **`http://<your-nas>:8088/ui`**.
 
 ### First-run checklist
 
-1. Dashboard → **Settings** → toggle `CATBOX_MODE` if you want lazy materialization
-2. Set `AUDIO_LANGUAGE_PREFERENCE` (e.g. `nl,en`)
-3. Add a Discord webhook or Telegram bot for notifications
-4. Overview → **🚑 Recovery wizard** to baseline the library
-5. Done — request a movie in Seerr and watch it appear
+1. Dashboard → **Settings** → toggle `CATBOX_MODE` if you want lazy materialization.
+2. Set `AUDIO_LANGUAGE_PREFERENCE` (e.g. `nl,en`).
+3. Add a Discord webhook or Telegram bot for notifications.
+4. Overview → **🚑 Recovery wizard** to baseline the library.
+5. Done. Request a movie in Seerr and watch it appear.
 
 ---
 
@@ -192,26 +192,27 @@ flowchart LR
 
 | Component | Where it lives |
 |---|---|
-| `processor.py` | Request → search → cache check → add to TorBox |
+| `processor.py` | Request, search, cache check, add to TorBox |
 | `strm_generator.py` | Walks TorBox mylist, writes `.strm` files (direct or proxy URL) |
 | `catbox.py` | Lazy materialize / release lifecycle |
 | `cleanup.py` | Repair broken strms, remove duplicates, regenerate trailers |
-| `upgrader.py` | Auto-upgrade + season-pack consolidation |
+| `upgrader.py` | Auto-upgrade and season-pack consolidation |
 | `monitor.py` | New-episode tracking for monitored series |
 | `recovery.py` | One-button repair wizard |
-| `app.py` | Flask app + scheduler + UI endpoints |
+| `webdav.py` | Optional read-only WebDAV server for Plex/Emby |
+| `app.py` | Flask app, scheduler, UI endpoints |
 
 ---
 
 ## ⚙️ Configuration
 
-Most settings are **hot-reloadable** via the Settings UI tab — only scheduler intervals require a container restart.
+Most settings are **hot-reloadable** via the Settings UI tab. Only scheduler intervals require a container restart.
 
 The full reference lives in [`.env.example`](.env.example). Key knobs:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TORBOX_API_KEY` | — | **Required.** From [torbox.app](https://torbox.app) → Settings → API |
+| `TORBOX_API_KEY` | *(required)* | From [torbox.app](https://torbox.app) → Settings → API |
 | `CATBOX_MODE` | `false` | Lazy materialization (recommended once stable) |
 | `CATBOX_HOST` | `http://10.0.0.10:8088` | Externally reachable URL for proxy strm URLs |
 | `CATBOX_IDLE_MINUTES` | `60` | Idle time before a torrent is released from TorBox |
@@ -226,6 +227,8 @@ The full reference lives in [`.env.example`](.env.example). Key knobs:
 | `AUTO_UPGRADE_ENABLED` | `true` | Periodic upgrade scan |
 | `SEASON_PACK_CONSOLIDATION_ENABLED` | `true` | Replace per-episode torrents with packs |
 | `TRENDING_PRECACHE_COUNT` | `0` | Top-N TMDB trending to auto-add (cached only) |
+| `WEBDAV_ENABLED` | `false` | Serve library as virtual .mkv files (Plex compat) |
+| `MULTI_DEBRID_ENABLED` | `false` | RealDebrid fallback when TorBox misses |
 | `DISCORD_WEBHOOK_URL` | *(empty)* | Optional notification target |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(empty)* | Optional notification target |
 | `OPENSUBTITLES_API_KEY` | *(empty)* | Optional subtitle download |
@@ -238,18 +241,15 @@ The container exposes three endpoints:
 
 | Endpoint | Used for |
 |---|---|
-| `GET /health` | DB-aware liveness — wired to the Docker `HEALTHCHECK`. Returns **503** if SQLite is unreachable. |
-| `GET /healthz` | Deep readiness — returns **503** if DB unreachable **or** both scrapers down. Useful for dashboards. |
+| `GET /health` | DB-aware liveness, wired to the Docker `HEALTHCHECK`. Returns **503** if SQLite is unreachable. |
+| `GET /healthz` | Deep readiness, returns **503** if DB unreachable or both scrapers down. Useful for dashboards. |
 | `GET /metrics` | Prometheus exposition. ~20 metrics covering throughput, latency, library size, retry depth, TorBox usage, Catbox state, service health. Scrape interval `30s` works well. |
 
-In **Synology Container Manager** the healthcheck is picked up automatically; a red badge means the container will be auto-restarted within ~3 minutes.
+In **Synology Container Manager** the healthcheck is picked up automatically; a red badge means the container will be auto-restarted within about 3 minutes.
 
 ### WebDAV / Plex compatibility (opt-in)
 
-Mycelium can serve the library as virtual `.mkv` files via WebDAV. Mount the
-share at the DSM host and any media server (Plex, Emby, Kodi, Infuse) can
-scan it like a normal filesystem. The container itself does **not** require
-FUSE — the mount is done at host level using DSM's built-in `davfs2`.
+Mycelium can serve the library as virtual `.mkv` files via WebDAV. Mount the share at the DSM host and any media server (Plex, Emby, Kodi, Infuse) can scan it like a normal filesystem. The container itself does **not** require FUSE; the mount is done at host level using DSM's built-in `davfs2`.
 
 **Enable it:**
 
@@ -303,7 +303,7 @@ A ready-made dashboard lives at [`assets/grafana-dashboard.json`](assets/grafana
 - Service-health stat tiles
 - Library size trend (movies / series)
 - Catbox virtual vs materialised gauge
-- Retry queue + blacklist + wanted-episodes ops row
+- Retry queue, blacklist and wanted-episodes ops row
 - Catbox stream-resolution rate (ok / rematerialized / failed)
 
 To import: **Dashboards → New → Import → Upload JSON file**, then pick your Prometheus datasource.
@@ -315,15 +315,15 @@ To import: **Dashboards → New → Import → Upload JSON file**, then pick you
 <details>
 <summary><b>Why not just use rclone + Plex?</b></summary>
 
-Rclone requires FUSE inside the container, which on Synology DSM means giving the container `SYS_ADMIN` and a `/dev/fuse` device — fragile and breaks across DSM updates. Mycelium writes `.strm` files Jellyfin reads as URLs, no kernel-level magic needed.
+Rclone requires FUSE inside the container, which on Synology DSM means giving the container `SYS_ADMIN` and a `/dev/fuse` device. That's fragile and breaks across DSM updates. Mycelium writes `.strm` files Jellyfin reads as URLs, no kernel-level magic needed.
 
-Plex doesn't support `.strm` natively. Sorry.
+Plex doesn't support `.strm` natively, but the optional WebDAV server (see above) closes that gap without rclone.
 </details>
 
 <details>
 <summary><b>What's the difference between fixed strm and Catbox mode?</b></summary>
 
-In **fixed strm** mode, each `.strm` contains a direct TorBox CDN URL. Simple, works even when this service is down, but URLs may rot after ~30 days as TorBox cycles its cache. The cleanup task repairs them on a 24h schedule.
+In **fixed strm** mode, each `.strm` contains a direct TorBox CDN URL. Simple, works even when this service is down, but URLs may rot after about 30 days as TorBox cycles its cache. The cleanup task repairs them on a 24h schedule.
 
 In **Catbox mode**, each `.strm` contains a proxy URL pointing at this service. On playback we re-add the torrent (if released), fetch a fresh URL, and 307-redirect. No URL rot, library size effectively unlimited, but playback requires Mycelium to be up.
 
@@ -337,7 +337,7 @@ Not directly. Mycelium consumes Seerr webhooks, not the qBittorrent API. If you 
 </details>
 
 <details>
-<summary><b>I made a bad request and now it's stuck retrying — how do I stop it?</b></summary>
+<summary><b>I made a bad request and now it's stuck retrying. How do I stop it?</b></summary>
 
 Settings tab → **Blacklist** → add the offending hash, or just `DELETE` the entry from `retry_queue` table. The blacklist auto-fills after `BLACKLIST_FAIL_THRESHOLD` consecutive failures (default 3).
 </details>
@@ -345,7 +345,7 @@ Settings tab → **Blacklist** → add the offending hash, or just `DELETE` the 
 <details>
 <summary><b>Will this run on a Raspberry Pi?</b></summary>
 
-Probably. Memory footprint is ~150 MB. Disk requirements are minimal (`.strm` files are ~200 bytes each). The Dockerfile is `python:3.12-slim` which has ARM64 + ARMv7 variants. Untested by me.
+Probably. Memory footprint is about 150 MB. Disk requirements are minimal (`.strm` files are roughly 200 bytes each). The Dockerfile is `python:3.12-slim` which has ARM64 and ARMv7 variants. Untested by me.
 </details>
 
 <details>
@@ -360,17 +360,18 @@ If the DB itself is corrupted: Overview → **🚑 Recovery wizard** rebuilds th
 
 ## 🗺 Roadmap
 
-- [x] ~~Multi-debrid productionised (RealDebrid as actual fallback)~~ — movies + season-pack series done
-- [x] ~~Plex compatibility via WebDAV~~ — mount via davfs2 on DSM host
-- [x] ~~Prometheus metrics export~~ — exposed at `/metrics`
-- [ ] Web-based one-click installer
-- [ ] Light official theme
+- [x] ~~Multi-debrid productionised (RealDebrid as actual fallback)~~. Movies and season-pack series done.
+- [x] ~~Plex compatibility via WebDAV~~. Mount via davfs2 on DSM host.
+- [x] ~~Prometheus metrics export~~. Exposed at `/metrics`.
+- [ ] Per-episode RealDebrid fallback (not just season packs).
+- [ ] Web-based one-click installer.
+- [ ] Light official theme.
 
 ---
 
 ## 🤝 Contributing
 
-PRs and issues welcome. There's no formal style guide — keep changes focused, run the (sparse) tests in `tests/`, and don't break the dashboard.
+PRs and issues welcome. There's no formal style guide. Keep changes focused, run the (sparse) tests in `tests/`, and don't break the dashboard.
 
 Please don't open an issue asking for piracy support. This project is for legitimate, paid TorBox subscribers managing their own content; what you do with it is your own responsibility.
 
@@ -378,15 +379,15 @@ Please don't open an issue asking for piracy support. This project is for legiti
 
 ## 📜 License
 
-[MIT](LICENSE) — do whatever, just don't blame me if your library disappears.
+[MIT](LICENSE). Do whatever, just don't blame me if your library disappears.
 
 ## 🙏 Credits
 
-- [elfhosted](https://elfhosted.com) — the CatBox concept that inspired the lazy-materialize mode
-- [TorBox](https://torbox.app) — a reasonably-priced debrid that doesn't suck
-- [Jellyseerr](https://jellyseerr.dev) + [Jellyfin](https://jellyfin.org) — the rest of the ecosystem
-- [Zilean](https://github.com/iPromKnight/zilean) — local-first scraping
-- [Torrentio](https://torrentio.strem.fun) — bottomless fallback
+- [elfhosted](https://elfhosted.com) for the CatBox concept that inspired the lazy-materialize mode.
+- [TorBox](https://torbox.app) for being a reasonably-priced debrid that doesn't suck.
+- [Jellyseerr](https://jellyseerr.dev) and [Jellyfin](https://jellyfin.org) for the rest of the ecosystem.
+- [Zilean](https://github.com/iPromKnight/zilean) for local-first scraping.
+- [Torrentio](https://torrentio.strem.fun) for bottomless fallback.
 
 ---
 
