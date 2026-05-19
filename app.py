@@ -7,6 +7,7 @@ from flask import Flask, abort, flash, jsonify, redirect, render_template, reque
 
 import backup
 import catbox
+import nfo_generator
 import catchup
 import cleanup
 import config as cfg
@@ -311,6 +312,8 @@ _delayed(15.0, monitor.sync_movies, "movie-sync-init")
 _delayed(20.0, monitor.sync_series, "series-sync-init")
 _delayed(30.0, strm_generator.run_and_refresh, "strm-init")
 _delayed(60.0, library_sync.resolve_unknowns, "resolve-unknowns-init")
+_delayed(90.0, library_sync.import_series_to_monitored, "series-monitored-init")
+_delayed(120.0, nfo_generator.generate_all, "nfo-init")
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -610,6 +613,13 @@ def ui_refresh_images():
     return redirect(url_for("ui_dashboard") + "#repair")
 
 
+@app.post("/ui/generate-nfos")
+def ui_generate_nfos():
+    threading.Thread(target=nfo_generator.generate_all, name="nfo-manual", daemon=True).start()
+    flash("NFO generation started — Jellyfin will pick up metadata on next scan", "ok")
+    return redirect(url_for("ui_dashboard") + "#repair")
+
+
 # ── New JSON APIs ─────────────────────────────────────────────────────────────
 
 @app.get("/ui/api/health")
@@ -893,6 +903,8 @@ def ui_api_orphans():
 def _library_import_and_resolve():
     library_sync.import_existing()
     library_sync.resolve_unknowns()
+    library_sync.import_series_to_monitored()
+    nfo_generator.generate_all()
 
 
 @app.post("/ui/library-import")

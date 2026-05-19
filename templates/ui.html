@@ -685,6 +685,9 @@
         <form method="post" action="/ui/refresh-images" style="display:inline">
           <button class="btn btn-secondary btn-sm" title="Fetch missing posters from Jellyfin metadata">🖼 Fix Covers</button>
         </form>
+        <form method="post" action="/ui/generate-nfos" style="display:inline">
+          <button class="btn btn-secondary btn-sm" title="Write NFO sidecar files with IMDb IDs for Jellyfin">📄 Gen NFOs</button>
+        </form>
       </div>
     </div>
     {% if last_cleanup %}

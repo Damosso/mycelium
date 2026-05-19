@@ -318,7 +318,10 @@ def run_once() -> int:
 
 def run_and_refresh() -> None:
     """Run strm generation and trigger Jellyfin scan if any new files were created."""
-    if run_once() > 0:
+    new_files = run_once()
+    import nfo_generator
+    nfo_generator.generate_all()
+    if new_files > 0:
         jellyfin.refresh_library()
     # Self-healing: proactive health probe of a small sample of existing strms.
     try:

@@ -13,6 +13,8 @@ import db
 import tmdb
 from config import MEDIA_PATH
 
+_SEASON_RE = re.compile(r"[Ss]eason\s*(\d+)")
+
 log = logging.getLogger(__name__)
 
 _FOLDER_YEAR_RE = re.compile(r"\((\d{4})\)$")
@@ -91,6 +93,50 @@ def import_existing() -> dict:
     log.info("Library import: scanned %d strm files, imported %d new items",
              len(files), imported)
     return {"scanned": len(files), "imported": imported}
+
+
+def import_series_to_monitored() -> int:
+    """Walk media/series/ and register any missing series in monitored_series."""
+    base = Path(MEDIA_PATH) / "series"
+    if not base.is_dir():
+        return 0
+
+    existing = {s["imdb_id"] for s in db.get_all_monitored_series()}
+    series_items = {m["title"]: m for m in db.get_media_items("series")}
+
+    added = 0
+    for series_dir in sorted(base.iterdir()):
+        if not series_dir.is_dir():
+            continue
+        title = series_dir.name
+        item = series_items.get(title)
+        imdb_id = item["imdb_id"] if item else None
+        if not imdb_id or imdb_id.startswith("unknown_"):
+            continue
+        if imdb_id in existing:
+            continue
+
+        seasons = sorted({
+            int(m.group(1))
+            for sub in series_dir.iterdir()
+            if sub.is_dir()
+            for m in [_SEASON_RE.match(sub.name)]
+            if m
+        }) or [1]
+
+        tmdb_id: int | None = None
+        try:
+            tmdb_id = tmdb.find_by_imdb(imdb_id, kind="tv")
+        except Exception:
+            pass
+
+        db.upsert_monitored_series(imdb_id, tmdb_id, title, seasons)
+        existing.add(imdb_id)
+        log.info("Imported series to monitored: %s (%s) seasons=%s", title, imdb_id, seasons)
+        added += 1
+
+    log.info("import_series_to_monitored: added %d series", added)
+    return added
 
 
 _TORRENT_PREFIX_RE = re.compile(
