@@ -46,9 +46,10 @@ def _pick_main_movie_file(files: list[dict]) -> dict | None:
     if not videos:
         return None
     non_trailer = [f for f in videos if not _is_trailer(f)]
-    pool = non_trailer or videos
-    big = [f for f in pool if (f.get('size') or 0) >= _MIN_MOVIE_SIZE]
-    return max(big or pool, key=lambda f: f.get('size') or 0)
+    if not non_trailer:
+        return None
+    big = [f for f in non_trailer if (f.get('size') or 0) >= _MIN_MOVIE_SIZE]
+    return max(big or non_trailer, key=lambda f: f.get('size') or 0)
 
 
 def _clean(s: str) -> str:
@@ -172,6 +173,9 @@ def process_torrent(item: dict) -> int:
 
     is_series = bool(_EP_RE.search(_clean(torrent_name)) or
                      re.search(r'\bS\d{1,2}\b', torrent_name, re.IGNORECASE))
+    if not is_series and _TRAILER_RE.search(_clean(torrent_name)):
+        log.debug("Skipping trailer torrent %s (%s)", torrent_id, torrent_name)
+        return 0
     if is_series:
         video_files = [f for f in files if _is_video(f.get('name') or '') and not _is_trailer(f)]
     else:
