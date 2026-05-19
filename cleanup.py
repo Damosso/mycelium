@@ -73,10 +73,20 @@ def _is_available_in_mylist(torrent_id: str, mylist: list[dict]) -> bool:
     return False
 
 
+_TITLE_TRAIL_RE = re.compile(r"[\[\(\{\s\-]+$")
+
+
 def _resolve_imdb(title: str, year: int | None, media_type: str) -> str | None:
+    clean = _TITLE_TRAIL_RE.sub("", title).strip()
     if media_type == "movie":
-        return tmdb.search_movie(title, year=year)
-    return tmdb.search_tv(title)
+        result = tmdb.search_movie(clean, year=year)
+        if not result and clean != title:
+            result = tmdb.search_movie(title, year=year)
+        return result
+    result = tmdb.search_tv(clean)
+    if not result and clean != title:
+        result = tmdb.search_tv(title)
+    return result
 
 
 def _fetch_candidates(imdb_id: str, title: str, media_type: str) -> list:
