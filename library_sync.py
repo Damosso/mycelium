@@ -140,9 +140,11 @@ def import_series_to_monitored() -> int:
 
 
 _TORRENT_PREFIX_RE = re.compile(
-    r"^(\[[^\]]+\]\s*|www[\s.][\w.\-]+\s*-\s*|rutor\.?\s*info\s*|\[?DEVIL-TORRENTS[^\]]*\]?\s*|HIDRATORRENTS[^\s]*\s*(?:MKV)?\s*-?(?:LEGENDADO)?-?\s*|superseed\s+\S+\s*)+",
+    r"^(\[[^\]]+\]\s*|www[\s.][\w.\-]+(?:[\s.][\w.\-]+)*\s*-\s*|rutor\.?\s*info\s*|\[?DEVIL-TORRENTS[^\]]*\]?\s*|HIDRATORRENTS[^\s]*\s*(?:MKV)?\s*-?(?:LEGENDADO)?-?\s*|superseed\s+\S+\s*|www\s+\w+\s+\w+\s*-\s*)+",
     re.IGNORECASE,
 )
+_SEASON_TRAIL_RE = re.compile(r'\s+(?:S\d{1,2}(?:E\d+)?|Season\s+\d+).*$', re.IGNORECASE)
+_YEAR_TRAIL_RE = re.compile(r'\s+\d{4}$')
 _TRAILING_JUNK_RE = re.compile(r"[\[\(]\s*$")
 _LATIN_RE = re.compile(r"[A-Za-z][A-Za-z0-9 :,'!&\-\.]+")
 
@@ -189,6 +191,16 @@ def resolve_unknowns() -> dict:
             candidates.append(latin)
         if base not in candidates:
             candidates.append(base)
+
+        if media_type == "series":
+            # Also try with trailing year (2024/2025) and season markers stripped
+            for src in list(candidates):
+                no_season = _SEASON_TRAIL_RE.sub("", src).strip()
+                if no_season and no_season not in candidates:
+                    candidates.append(no_season)
+                no_year = _YEAR_TRAIL_RE.sub("", no_season or src).strip()
+                if no_year and no_year not in candidates:
+                    candidates.append(no_year)
 
         real_id = None
         for cand in candidates:

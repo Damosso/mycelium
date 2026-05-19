@@ -490,7 +490,18 @@ def rekey_media_item(old_id: str, new_id: str, media_type: str) -> bool:
             return cur.rowcount > 0
         except Exception:
             conn.rollback()
-            return False
+            # new_id already exists (UNIQUE conflict) — the unknown_ row is a duplicate;
+            # just delete it so the canonical entry remains.
+            try:
+                conn.execute(
+                    "DELETE FROM media_items WHERE imdb_id=? AND media_type=?",
+                    (old_id, media_type),
+                )
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                return False
 
 
 # ── cleanup_runs ──────────────────────────────────────────────────────────────
