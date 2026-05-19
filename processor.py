@@ -120,7 +120,50 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
         log.error("No suitable stream for movie %s (%s)", req.title, req.imdb_id)
         return False, None
     log.info("Trying %d candidate(s) for %s", len(candidates), req.title)
-    return _add_best_from(candidates, req.title)
+    ok, winner = _add_best_from(candidates, req.title)
+    if ok:
+        return ok, winner
+    # TorBox failed. If MULTI_DEBRID is on and RealDebrid has any candidate
+    # cached, fall back to RD for movies (series via RD is not yet supported).
+    fallback = _try_realdebrid_fallback(req.title, candidates)
+    if fallback:
+        return True, fallback
+    return False, None
+
+
+def _try_realdebrid_fallback(title: str, candidates: list) -> Optional[TorrentioStream]:
+    """Add the best RD-cached candidate via RealDebrid and write a direct .strm."""
+    try:
+        import realdebrid
+        from config import MULTI_DEBRID_ENABLED
+    except Exception:
+        return None
+    if not MULTI_DEBRID_ENABLED or not realdebrid.is_configured():
+        return None
+    candidates = blacklist.filter_candidates(candidates)
+    rd_cached = realdebrid.check_cached([c.info_hash for c in candidates[:20]])
+    rd_candidates = [c for c in candidates if c.info_hash in rd_cached]
+    if not rd_candidates:
+        log.info("RD fallback: no candidates cached on RealDebrid for %s", title)
+        return None
+    log.info("RD fallback: %d cached on RD — trying best", len(rd_candidates))
+    for cand in rd_candidates[:2]:
+        try:
+            added = realdebrid.add_magnet(cand.magnet)
+            rd_id = added.get("id")
+            if not rd_id:
+                continue
+            realdebrid.wait_until_ready(rd_id)
+            url = realdebrid.get_main_video_url(rd_id)
+            if not url:
+                continue
+            strm_generator.create_movie_strm_from_url(title, url)
+            log.info("RD fallback: served %s via RealDebrid (hash=%s)", title, cand.info_hash)
+            return cand
+        except Exception as exc:
+            log.warning("RD fallback failed for %s (%s): %s", title, cand.info_hash, exc)
+            blacklist.record_failure(cand.info_hash, f"rd: {exc}")
+    return None
 
 
 def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[TorrentioStream]]:
@@ -201,6 +244,7 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         torrent_id = item.get('id') if item else None
         if torrent_id:
             strm_generator.create_strm_for_torrent(torrent_id, req.title, req.media_type)
+        # RD fallback already wrote its .strm before returning; nothing to do here.
             # Best-effort subtitle fetch
             try:
                 import subtitles

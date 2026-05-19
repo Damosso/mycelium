@@ -226,6 +226,29 @@ def create_strm_for_torrent(torrent_id: int, title: str, media_type: str) -> int
     return process_torrent(item)
 
 
+def create_movie_strm_from_url(title: str, url: str) -> Path | None:
+    """Write a movie .strm pointing at a direct CDN URL (e.g. RealDebrid).
+    Parses year from the title and builds the standard movies/Title (Year)/Title (Year).strm
+    path. Returns the written path, or None on failure."""
+    if not url:
+        return None
+    yr = _YEAR_RE.search(title)
+    year = int(yr.group(1)) if yr else None
+    clean_title = _safe(title[:yr.start()].strip() if yr else title)
+    folder = f"{clean_title} ({year})" if year else clean_title
+    path = Path(MEDIA_PATH) / "movies" / folder / f"{folder}.strm"
+    if path.exists():
+        return path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(url, encoding="utf-8")
+        log.info("Created RD .strm: %s", path)
+        return path
+    except Exception as exc:
+        log.warning("Could not write RD .strm %s: %s", path, exc)
+        return None
+
+
 def run_once() -> int:
     """Scan entire TorBox mylist and create any missing .strm files. Returns new file count."""
     log.info("strm_generator: scanning TorBox mylist")

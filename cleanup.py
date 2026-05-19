@@ -117,6 +117,11 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
     parts = rel.parts
     media_type = "series" if (len(parts) > 0 and parts[0] == "series") else "movie"
 
+    # Non-TorBox URLs (e.g. RealDebrid direct links, Catbox proxy) have a different
+    # lifecycle and cleanup logic doesn't apply.
+    if "real-debrid.com" in url or "/d/" in url or "/stream/" in url:
+        return "ok"
+
     if torrent_id and _is_available_in_mylist(torrent_id, mylist):
         log.debug("strm OK (torrent_id=%s): %s", torrent_id, path.name)
         return "ok"

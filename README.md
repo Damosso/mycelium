@@ -289,7 +289,7 @@ If the DB itself is corrupted: Overview → **🚑 Recovery wizard** rebuilds th
 
 ## 🗺 Roadmap
 
-- [ ] Multi-debrid productionised (RealDebrid as actual fallback, not just informational)
+- [x] ~~Multi-debrid productionised (RealDebrid as actual fallback, not just informational)~~ — movies done; series still TorBox-only
 - [ ] Plex compatibility via in-container SMB/WebDAV proxy
 - [ ] Prometheus metrics export
 - [ ] Web-based one-click installer

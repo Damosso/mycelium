@@ -114,3 +114,35 @@ def unrestrict_link(link: str, timeout: int = 15) -> str | None:
     except Exception as exc:
         log.warning("RealDebrid unrestrict failed: %s", exc)
         return None
+
+
+_VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".m4v", ".mov", ".webm", ".ts", ".m2ts")
+
+
+def _is_video(name: str) -> bool:
+    n = (name or "").lower()
+    return n.endswith(_VIDEO_EXTS)
+
+
+def get_main_video_url(rd_id: str) -> str | None:
+    """For a ready RD torrent, pick the largest video file and return an
+    unrestricted CDN URL for it. Returns None if RD couldn't deliver."""
+    info = get_info(rd_id)
+    if not info:
+        return None
+    files = info.get("files") or []
+    links = info.get("links") or []
+    if not files or not links:
+        return None
+    # RD pairs selected files with the links array in order. Build (size, link)
+    # tuples for selected video files.
+    selected = [(f, links[idx]) for idx, f in enumerate(
+        [f for f in files if f.get("selected")]) if idx < len(links)]
+    video_files = [(f, link) for f, link in selected if _is_video(f.get("path") or f.get("name") or "")]
+    if not video_files:
+        return None
+    # Skip obvious trailers (< 200 MB) when we have larger files
+    big = [(f, link) for f, link in video_files if (f.get("bytes") or 0) >= 200 * 1024 * 1024]
+    pool = big or video_files
+    main = max(pool, key=lambda fl: fl[0].get("bytes") or 0)
+    return unrestrict_link(main[1])
