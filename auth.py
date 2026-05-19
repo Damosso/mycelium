@@ -1,0 +1,181 @@
+"""Dashboard authentication.
+
+Two flavours, both opt-in:
+
+1. Built-in session login. AUTH_USERNAME + a scrypt-hashed AUTH_PASSWORD.
+   The wizard collects a plain password and immediately hashes it; the
+   plain value is wiped from settings after the hash lands.
+
+2. Reverse-proxy header trust. If you already run Authelia, Authentik,
+   Traefik forward-auth or similar in front of Mycelium, set
+   TRUSTED_PROXY_AUTH=true and the user from the configured header is
+   accepted as authenticated. A network whitelist guards against
+   header spoofing from non-proxy clients.
+
+Webhook, /health, /healthz and /metrics stay unauthenticated so external
+systems (Seerr, Synology Container Manager, Prometheus) keep working.
+"""
+from __future__ import annotations
+
+import functools
+import hashlib
+import hmac
+import ipaddress
+import logging
+import secrets
+
+from flask import jsonify, redirect, request, session, url_for
+
+import settings
+
+log = logging.getLogger(__name__)
+
+_PUBLIC_PATHS = (
+    "/webhook",
+    "/torbox-webhook",
+    "/health",
+    "/healthz",
+    "/metrics",
+    "/login",
+    "/logout",
+    "/setup",
+    "/setup/",
+    "/dav",
+    "/stream/",
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Password hashing
+# ─────────────────────────────────────────────────────────────────────────────
+
+def hash_password(pw: str) -> str:
+    salt = secrets.token_hex(16)
+    h = hashlib.scrypt(pw.encode(), salt=salt.encode(), n=2 ** 14, r=8, p=1, dklen=32)
+    return f"scrypt${salt}${h.hex()}"
+
+
+def _verify_hashed(pw: str, stored: str) -> bool:
+    try:
+        _, salt, hash_hex = stored.split("$", 2)
+        expected = hashlib.scrypt(pw.encode(), salt=salt.encode(),
+                                   n=2 ** 14, r=8, p=1, dklen=32)
+        return hmac.compare_digest(expected.hex(), hash_hex)
+    except Exception:
+        return False
+
+
+def _verify_password(pw: str) -> bool:
+    hashed = settings.get("AUTH_PASSWORD_HASH", "")
+    if hashed and hashed.startswith("scrypt$"):
+        return _verify_hashed(pw, hashed)
+    # First-run fallback: AUTH_PASSWORD stored as plain. If it matches, upgrade.
+    plain = settings.get("AUTH_PASSWORD", "")
+    if plain and hmac.compare_digest(pw, plain):
+        settings.set("AUTH_PASSWORD_HASH", hash_password(pw))
+        settings.set("AUTH_PASSWORD", None)
+        log.info("AUTH_PASSWORD upgraded to scrypt hash")
+        return True
+    return False
+
+
+def set_password(pw: str) -> None:
+    """Public helper used by the setup wizard / settings UI."""
+    settings.set("AUTH_PASSWORD_HASH", hash_password(pw))
+    settings.set("AUTH_PASSWORD", None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reverse-proxy header trust
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ip_in_trusted(remote: str | None) -> bool:
+    if not remote:
+        return False
+    networks_raw = settings.get("TRUSTED_PROXY_NETWORKS", "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
+    if isinstance(networks_raw, list):
+        nets = networks_raw
+    else:
+        nets = [n.strip() for n in (networks_raw or "").split(",") if n.strip()]
+    try:
+        ip = ipaddress.ip_address(remote)
+    except ValueError:
+        return False
+    for n in nets:
+        try:
+            if ip in ipaddress.ip_network(n, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _proxy_user() -> str | None:
+    if not settings.get("TRUSTED_PROXY_AUTH", False):
+        return None
+    if not _ip_in_trusted(request.remote_addr):
+        return None
+    header = settings.get("TRUSTED_PROXY_USER_HEADER", "X-Forwarded-User")
+    return request.headers.get(header) or None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_enabled() -> bool:
+    return bool(settings.get("AUTH_ENABLED", False))
+
+
+def current_user() -> str | None:
+    if not is_enabled():
+        return None
+    return session.get("user") or _proxy_user()
+
+
+def attempt_login(username: str, password: str) -> bool:
+    expected_user = settings.get("AUTH_USERNAME", "admin") or "admin"
+    if not hmac.compare_digest(username, expected_user):
+        return False
+    return _verify_password(password)
+
+
+def require_auth(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not is_enabled():
+            return view(*args, **kwargs)
+        if session.get("user"):
+            return view(*args, **kwargs)
+        if _proxy_user():
+            session["user"] = _proxy_user()
+            return view(*args, **kwargs)
+        # Not authenticated
+        if request.path.startswith("/ui/api/") or request.headers.get("Accept", "").startswith("application/json"):
+            return jsonify(error="unauthorized"), 401
+        return redirect(url_for("login_view", next=request.path))
+    return wrapped
+
+
+def install_before_request(app) -> None:
+    """Apply auth as a before_request hook so every UI route is covered."""
+    @app.before_request
+    def _enforce():
+        if not is_enabled():
+            return None
+        path = request.path
+        # Public paths are always allowed
+        for prefix in _PUBLIC_PATHS:
+            if path == prefix or path.startswith(prefix + "/") or path == prefix.rstrip("/"):
+                return None
+        if path.startswith("/dav") or path.startswith("/stream/"):
+            return None
+        if session.get("user"):
+            return None
+        proxy_user = _proxy_user()
+        if proxy_user:
+            session["user"] = proxy_user
+            return None
+        if path.startswith("/ui/api/") or request.headers.get("Accept", "").startswith("application/json"):
+            return jsonify(error="unauthorized"), 401
+        return redirect(url_for("login_view", next=path))

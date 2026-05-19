@@ -250,6 +250,29 @@ def create_series_strms_from_files(torrent_name: str, files_with_urls: list) -> 
     return written
 
 
+def create_episode_strm_from_url(title: str, season: int, episode: int,
+                                   url: str) -> Path | None:
+    """Write a single-episode .strm at series/{Title}/Season XX/{Title} SnnEmm.strm."""
+    if not url:
+        return None
+    clean_title = _safe(title)
+    if not clean_title:
+        return None
+    season_folder = f"Season {season:02d}"
+    file_name = f"{clean_title} S{season:02d}E{episode:02d}.strm"
+    path = Path(MEDIA_PATH) / "series" / clean_title / season_folder / file_name
+    if path.exists():
+        return path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(url, encoding="utf-8")
+        log.info("Created episode .strm: %s", path)
+        return path
+    except Exception as exc:
+        log.warning("Could not write episode .strm %s: %s", path, exc)
+        return None
+
+
 def create_movie_strm_from_url(title: str, url: str) -> Path | None:
     """Write a movie .strm pointing at a direct CDN URL (e.g. RealDebrid).
     Parses year from the title and builds the standard movies/Title (Year)/Title (Year).strm

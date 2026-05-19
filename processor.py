@@ -132,11 +132,14 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
 
 
 def _try_realdebrid_fallback(title: str, candidates: list,
-                              media_type: str = "movie") -> Optional[TorrentioStream]:
+                              media_type: str = "movie",
+                              season: int | None = None,
+                              episode: int | None = None) -> Optional[TorrentioStream]:
     """Add the best RD-cached candidate via RealDebrid and write .strm file(s).
 
-    Movies: largest non-trailer file → single .strm.
-    Series: every video file in the pack → per-episode .strm files.
+    media_type='movie'   : largest non-trailer video file -> single .strm
+    media_type='series'  : assumes season pack, fans out per-episode .strm files
+    media_type='episode' : single-episode torrent, requires season + episode args
     """
     try:
         import realdebrid
@@ -164,6 +167,14 @@ def _try_realdebrid_fallback(title: str, candidates: list,
                 if not url:
                     continue
                 strm_generator.create_movie_strm_from_url(title, url)
+            elif media_type == "episode":
+                if season is None or episode is None:
+                    log.error("RD fallback episode: season/episode missing")
+                    continue
+                url = realdebrid.get_main_video_url(rd_id)
+                if not url:
+                    continue
+                strm_generator.create_episode_strm_from_url(title, season, episode, url)
             else:
                 pairs = realdebrid.get_video_files_with_urls(rd_id)
                 if not pairs:
@@ -212,6 +223,14 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
             log.info("No more episodes returned at S%02dE%02d", season, episode)
             break
         ok, winner = _add_best_from(candidates, f"{req.title} S{season:02d}E{episode:02d}")
+        if not ok:
+            rd_winner = _try_realdebrid_fallback(
+                req.title, candidates,
+                media_type="episode", season=season, episode=episode,
+            )
+            if rd_winner:
+                ok = True
+                winner = rd_winner
         if ok:
             added += 1
             first_winner = first_winner or winner

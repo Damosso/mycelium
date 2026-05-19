@@ -63,9 +63,52 @@ log_buffer.install()
 log = logging.getLogger("mycelium")
 
 app = Flask(__name__)
-app.secret_key = "mycelium-ui"
+app.secret_key = cfg.AUTH_SESSION_SECRET
 
 db.init()
+
+import auth
+auth.install_before_request(app)
+
+
+@app.get("/login")
+def login_view():
+    return render_template("login.html",
+                            error=request.args.get("error"),
+                            next=request.args.get("next", ""))
+
+
+@app.post("/login")
+def login_submit():
+    from flask import session as _session
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    nxt = request.form.get("next") or "/ui"
+    if auth.attempt_login(username, password):
+        _session["user"] = username
+        return redirect(nxt)
+    return redirect(url_for("login_view", error="1", next=nxt))
+
+
+@app.get("/logout")
+def logout_view():
+    from flask import session as _session
+    _session.pop("user", None)
+    return redirect(url_for("login_view"))
+
+
+@app.post("/ui/set-password")
+def ui_set_password():
+    if not auth.is_enabled() and not auth.current_user() and not request.form.get("force_first"):
+        # Don't expose this when auth is off — the user wouldn't get gated anyway
+        return jsonify(error="auth disabled"), 400
+    new_pw = request.form.get("password") or ""
+    if len(new_pw) < 6:
+        flash("Password must be at least 6 characters", "err")
+        return redirect(url_for("ui_dashboard") + "#settings")
+    auth.set_password(new_pw)
+    flash("Password updated", "ok")
+    return redirect(url_for("ui_dashboard") + "#settings")
 
 
 def _start_scheduler() -> BackgroundScheduler:

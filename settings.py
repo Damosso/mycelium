@@ -30,6 +30,9 @@ _BOOL_KEYS = {
     "NOTIFY_ON_SUCCESS",
     "NOTIFY_ON_FAILURE",
     "MULTI_DEBRID_ENABLED",
+    "WEBDAV_ENABLED",
+    "AUTH_ENABLED",
+    "TRUSTED_PROXY_AUTH",
 }
 _LIST_KEYS = {
     "QUALITY_PREFERENCE",
@@ -97,6 +100,13 @@ HOT_RELOAD = {
     "WEBDAV_ENABLED",
     "MULTI_DEBRID_ENABLED",
     "REALDEBRID_API_KEY",
+    "AUTH_ENABLED",
+    "AUTH_USERNAME",
+    "AUTH_PASSWORD",
+    "AUTH_PASSWORD_HASH",
+    "TRUSTED_PROXY_AUTH",
+    "TRUSTED_PROXY_USER_HEADER",
+    "TRUSTED_PROXY_NETWORKS",
 }
 
 # Logical groups for the Settings UI tab.
@@ -139,6 +149,15 @@ SETTING_GROUPS = [
             "SEASON_PACK_CONSOLIDATION_ENABLED", "SEASON_PACK_CHECK_INTERVAL_HOURS",
             "TRENDING_PRECACHE_COUNT", "TRENDING_CHECK_INTERVAL_HOURS",
             "BLACKLIST_FAIL_THRESHOLD",
+        ],
+    },
+    {
+        "id": "security",
+        "title": "Authentication",
+        "keys": [
+            "AUTH_ENABLED", "AUTH_USERNAME",
+            "TRUSTED_PROXY_AUTH", "TRUSTED_PROXY_USER_HEADER",
+            "TRUSTED_PROXY_NETWORKS",
         ],
     },
     {

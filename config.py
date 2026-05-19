@@ -157,6 +157,26 @@ WEBDAV_ENABLED = _env("WEBDAV_ENABLED", "false").lower() in ("1", "true", "yes")
 WEBDAV_PATH_PREFIX = _env("WEBDAV_PATH_PREFIX", "/dav")
 WEBDAV_URL_CACHE_TTL_SECONDS = _env_int("WEBDAV_URL_CACHE_TTL_SECONDS", 3600)
 
+# ── Authentication (opt-in) ──────────────────────────────────────────────────
+# When AUTH_ENABLED is true the dashboard and JSON APIs require a session
+# cookie. Set the password via the setup wizard or the Settings tab; on
+# first login a plain AUTH_PASSWORD is upgraded to a scrypt hash and the
+# plain copy is wiped.
+AUTH_ENABLED = _env("AUTH_ENABLED", "false").lower() in ("1", "true", "yes")
+AUTH_USERNAME = _env("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = _env("AUTH_PASSWORD", "")  # plain (will be upgraded), or empty
+AUTH_SESSION_SECRET = _env("AUTH_SESSION_SECRET", "mycelium-please-change-me")
+
+# Trust an upstream proxy that does auth (Authelia / Authentik / Traefik /
+# Cloudflare Access). Only honoured when the request originates from a
+# trusted network so headers can't be spoofed from the public internet.
+TRUSTED_PROXY_AUTH = _env("TRUSTED_PROXY_AUTH", "false").lower() in ("1", "true", "yes")
+TRUSTED_PROXY_USER_HEADER = _env("TRUSTED_PROXY_USER_HEADER", "X-Forwarded-User")
+TRUSTED_PROXY_NETWORKS = _env(
+    "TRUSTED_PROXY_NETWORKS",
+    "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+)
+
 
 def configure_logging() -> None:
     logging.basicConfig(

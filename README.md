@@ -411,9 +411,9 @@ If the DB itself is corrupted: Overview → **🚑 Recovery wizard** rebuilds th
 - [x] ~~Prometheus metrics export~~. Exposed at `/metrics`.
 - [x] ~~Web-based one-click installer~~. Visit `/ui` on first run.
 - [x] ~~Light official theme~~. Toggle from the topbar icon.
-- [ ] Per-episode RealDebrid fallback (not just season packs).
-- [ ] Optional auth for the dashboard.
-- [ ] OIDC / reverse-proxy header support.
+- [x] ~~Per-episode RealDebrid fallback~~. Movies, season packs and per-episode all go through RD when TorBox misses.
+- [x] ~~Optional auth for the dashboard~~. Session login or trusted-proxy headers.
+- [ ] Native OIDC support (today: reverse-proxy header trust covers most OIDC stacks).
 
 ---
 
