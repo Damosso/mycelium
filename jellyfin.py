@@ -24,23 +24,61 @@ def refresh_library(timeout: int = 30) -> bool:
     return True
 
 
+def _jf_headers() -> dict:
+    h = {"Content-Type": "application/json"}
+    if JELLYFIN_API_KEY:
+        h["X-Emby-Token"] = JELLYFIN_API_KEY
+    return h
+
+
 def merge_duplicate_versions(timeout: int = 60) -> bool:
-    """Trigger Jellyfin to merge duplicate movie versions into a single entry."""
+    """Find duplicate movies in Jellyfin and merge their versions."""
     if not JELLYFIN_URL:
         log.warning("JELLYFIN_URL not set; skipping MergeVersions")
         return False
-    url = f"{JELLYFIN_URL.rstrip('/')}/Items/MergeVersions"
-    headers = {"Content-Type": "application/json"}
-    if JELLYFIN_API_KEY:
-        headers["X-Emby-Token"] = JELLYFIN_API_KEY
-    log.info("Triggering Jellyfin MergeVersions: %s", url)
+
+    base = JELLYFIN_URL.rstrip("/")
+    headers = _jf_headers()
+
     try:
-        resp = requests.post(url, headers=headers, json={}, timeout=timeout)
-    except requests.RequestException as exc:
-        log.error("Jellyfin MergeVersions request failed: %s", exc)
+        resp = requests.get(
+            f"{base}/Items",
+            headers=headers,
+            params={"IncludeItemTypes": "Movie", "Recursive": "true",
+                    "Fields": "ProviderIds", "Limit": 5000},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("Items") or []
+    except Exception as exc:
+        log.error("Jellyfin MergeVersions: could not fetch movies: %s", exc)
         return False
-    if resp.status_code >= 400:
-        log.error("Jellyfin MergeVersions failed: %s %s", resp.status_code, resp.text[:200])
-        return False
-    log.info("Jellyfin MergeVersions accepted (%s)", resp.status_code)
+
+    # Group by normalised name (lowercase, strip year suffixes)
+    import re as _re
+    groups: dict[str, list[str]] = {}
+    for item in items:
+        name = _re.sub(r"\s*\(\d{4}\)\s*$", "", item.get("Name") or "").strip().lower()
+        groups.setdefault(name, []).append(item["Id"])
+
+    merged = 0
+    for name, ids in groups.items():
+        if len(ids) < 2:
+            continue
+        try:
+            r = requests.post(
+                f"{base}/Videos/MergeVersions",
+                headers=headers,
+                params={"Ids": ",".join(ids)},
+                timeout=timeout,
+            )
+            if r.status_code < 400:
+                log.info("Merged %d versions of '%s'", len(ids), name)
+                merged += 1
+            else:
+                log.debug("Merge failed for '%s': %s", name, r.status_code)
+        except Exception as exc:
+            log.debug("Merge error for '%s': %s", name, exc)
+
+    log.info("Jellyfin MergeVersions: merged %d duplicate group(s)", merged)
     return True
