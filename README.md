@@ -48,21 +48,19 @@ Built for the **Jellyfin + TorBox + Synology NAS** stack. No FUSE, no rclone, no
 
 ## 🌱 Why Mycelium?
 
-This didn't start as a project. It started as a morning discovering that 71.8% of my media library had silently disappeared overnight.
+It started with Real-Debrid quietly filtering "infringing_file" content overnight. No announcement, no migration path. 2,559 of 3,564 cached torrents gone. The Plex library was still there, full of posters and metadata, but every second item threw a "file not available" error when you tried to play it.
 
-Real-Debrid had started filtering torrents it classified as "infringing_file". No announcement, no migration path, just 2,559 of my 3,564 cached torrents gone. Years of carefully curated content, vanished. The Plex library was still there, full of posters and metadata, but every second item threw a "file not available" error when you tried to play it. The whole stack (Sonarr, Radarr, Prowlarr, Decypharr, Plex) had been built on a foundation that could be pulled away at any moment by a policy decision at a single company.
+The switch to TorBox seemed straightforward. It wasn't.
 
-That was the moment to switch to TorBox: no content filtering, no torrent limits, a debrid that doesn't quietly destroy your library. But switching debrid meant the whole stack needed to change, and that's when the real problems started.
+After migrating the stack, Sonarr triggered a full missing-episode search across thousands of series episodes. Decypharr, configured with 100 workers per debrid, started hammering the FUSE mount with 200 concurrent I/O operations. On spinning HDDs, that's a death sentence. Load hit 165. CPU was at 0.1%. I/O wait was at 97.7%. The NAS needed a hard power cycle to recover.
 
-The Synology DS920+ runs kernel 4.4, and kernel 4.4 doesn't propagate FUSE mounts reliably into Docker containers. Decypharr creates symlinks inside a FUSE mount and signals Sonarr that the download is ready. Sonarr looks for the file and finds nothing. 123 downloads stuck on `pausedUP`, three days of debugging `rshared` vs `rslave` mount flags, and the conclusion was unavoidable: this combination fundamentally doesn't work on this hardware.
+After throttling workers to 5 and restarting, a new problem surfaced: 123 downloads stuck on `pausedUP`, nothing importing into Sonarr. Three days of debugging `rshared` vs `rslave` mount flags led to the same conclusion: Synology's kernel 4.4 doesn't propagate FUSE mounts reliably into Docker containers. Sonarr could list the directory but couldn't read the files. The import step was broken at the OS level, unfixable by configuration.
 
-TMC (TorBox Media Center) looked like the fix. Generate `.strm` files Jellyfin can play directly, no FUSE required. It worked, until it didn't. TMC would wipe its entire `.strm` library on restart, crash mid-rebuild on items missing metadata titles, and leave Jellyfin staring at an empty collection. No visibility into what went wrong, no repair path, just SSH into the NAS and start over.
+TMC was the next attempt. No FUSE, just `.strm` files. It worked until restart, when it wiped the entire library and crashed mid-rebuild on items with missing metadata. No visibility, no repair path.
 
-CatBox from elfhosted pointed at a better pattern: a virtual library where torrents only materialise when you actually press play. Elegant. But CatBox lives inside elfhosted's private network, it can't reach a self-hosted Jellyfin on a home NAS.
+What started as a simple 100-line webhook to catch a Seerr approval and add a torrent to TorBox quietly grew. At some point it stopped being a webhook and became something else.
 
-So the question became: what would it take to build that same pattern, running entirely on my own hardware, without FUSE, without `SYS_ADMIN`, without renting someone else's compute, and without a single external company being able to delete my library again?
-
-Mycelium is the answer.
+The name felt right. Mycelium.
 
 ---
 
