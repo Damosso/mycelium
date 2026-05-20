@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 _LAST_FAIL_REASON: dict[str, str] = {}
 
 
+class RateLimited(Exception):
+    """Raised when TorBox returns 429 and the short in-call retry is exhausted.
+    Signals the caller to reschedule via the retry queue rather than marking
+    the request permanently failed (and without blacklisting the torrent)."""
+
+
 def _rank(streams, prefer_season_pack: bool = False, override: dict | None = None):
     return torrentio.rank_streams(streams, prefer_season_pack=prefer_season_pack, override=override)
 
@@ -60,24 +66,33 @@ def _fetch_season_candidates(req: MediaRequest, season: int, episode: int, prefe
     return _rank(streams, prefer_season_pack=prefer_season_pack, override=override)
 
 
+def _is_429(exc: Exception) -> bool:
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    return "429" in str(exc)
+
+
 def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
-    """Try adding a single magnet to TorBox. On 429 waits 15s and retries once."""
+    """Try adding a single magnet to TorBox. On 429 waits 15s and retries once;
+    if still rate limited, raises RateLimited so the request is rescheduled
+    instead of blacklisting an otherwise-good torrent."""
     for attempt in range(2):
         try:
             torbox.add_magnet(stream.magnet)
             torbox.wait_until_ready(stream.info_hash)
             return True
         except Exception as exc:
-            resp = getattr(exc, "response", None)
-            if resp is not None and resp.status_code == 429:
+            if _is_429(exc):
                 if attempt == 0:
                     log.warning("Rate limited (429) adding %s — waiting 15s then retrying", label)
                     time.sleep(15)
                     continue
+                log.warning("Still rate limited (429) adding %s — will retry later", label)
+                raise RateLimited()
             log.warning("Failed to add %s (hash=%s): %s", label, stream.info_hash, exc)
             blacklist.record_failure(stream.info_hash, str(exc)[:200])
             return False
-    blacklist.record_failure(stream.info_hash, "rate limit / retry exhausted")
     return False
 
 
@@ -284,6 +299,16 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
                 if ok:
                     success = True
                     winner = winner or w
+    except RateLimited:
+        # TorBox 429 — not a real failure. Reschedule and surface a clear status.
+        _LAST_FAIL_REASON.pop(req.imdb_id, None)
+        db.update_request(row_id, "rate_limited",
+                          error="TorBox rate limit (60/hour) hit — will retry automatically")
+        import retry_queue
+        retry_queue.schedule(req, _retry_attempt)
+        log.warning("Rate limited processing %s — rescheduled via retry queue", req.title)
+        db.record_metric("request_rate_limited", req.media_type, value_int=1)
+        return False
     except Exception as exc:
         log.exception("Unexpected error processing %s", req.title)
         db.update_request(row_id, "failed", error=str(exc))

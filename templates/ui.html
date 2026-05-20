@@ -133,7 +133,7 @@
     .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
     .badge-success, .badge-available, .badge-found, .badge-ok      { background: var(--green-bg); color: var(--green); }
     .badge-failed,  .badge-give_up, .badge-down, .badge-unfixable  { background: var(--red-bg); color: var(--red); }
-    .badge-pending, .badge-wanted                                  { background: var(--amber-bg); color: var(--amber); }
+    .badge-pending, .badge-wanted, .badge-rate_limited             { background: var(--amber-bg); color: var(--amber); }
     .badge-processing, .badge-not_aired                            { background: var(--indigo-bg); color: var(--indigo); }
     .badge-active, .badge-cached, .badge-completed, .badge-uploading { background: var(--green-bg); color: var(--green); }
     .badge-complete, .badge-disabled, .badge-deleted                 { background: var(--panel2); color: var(--muted); }
@@ -616,8 +616,8 @@
             <td class="dim">{{ r.media_type }}</td>
             <td class="dim">{{ r.seasons or '—' }}</td>
             <td>
-              <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
-              {% if r.status == 'failed' and r.error %}
+              <span class="badge badge-{{ r.status }}">{{ r.status.replace('_',' ') }}</span>
+              {% if r.status in ('failed', 'rate_limited') and r.error %}
               <span class="dim" style="display:block;font-size:10px;margin-top:3px;max-width:220px" title="{{ r.error }}">{{ r.error[:60] }}{% if r.error|length > 60 %}…{% endif %}</span>
               {% endif %}
             </td>
@@ -625,7 +625,7 @@
             <td class="dim">{{ r.source or '—' }}</td>
             <td class="dim">{{ r.created_at }}</td>
             <td>
-              {% if r.status == 'failed' %}
+              {% if r.status in ('failed', 'rate_limited') %}
               <form method="post" action="/ui/retry-request/{{ r.id }}" style="display:inline">
                 <button class="btn btn-sm btn-secondary">↻ Retry</button>
               </form>
