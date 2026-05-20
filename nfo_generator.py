@@ -28,11 +28,18 @@ _PREFIX_RE = re.compile(
     r'|superseed\s+\S+\s*|\[BEST-TORRENTS[^\]]*\]\s*|\[XTORRENTY[^\]]*\]\s*)+',
     re.IGNORECASE,
 )
+_CYRILLIC_PREFIX_RE = re.compile(r'^[Ѐ-ӿ\s\(\)\[\]«»,.\-–—]+')
 
 
 def _clean_for_tmdb(raw: str) -> str:
     s = _PREFIX_RE.sub("", raw).strip()
+    # Strip leading Cyrillic block (Russian title prepended by torrent sites)
+    s = _CYRILLIC_PREFIX_RE.sub("", s).strip()
+    # Strip parenthesised blocks containing Cyrillic (e.g. director name)
+    s = re.sub(r'\([^)]*[Ѐ-ӿ][^)]*\)', '', s).strip()
     s = _SEASON_TRAIL_RE.sub("", s).strip()
+    # Strip trailing year in parens — passed separately as year_hint
+    s = re.sub(r'\s*\(\d{4}\)\s*$', '', s).strip()
     s = _YEAR_TRAIL_RE.sub("", s).strip()
     s = re.sub(r"[\[\(\{\s\-]+$", "", s).strip()
     return s
@@ -93,19 +100,34 @@ def generate_all() -> dict:
             nfo_path = folder / f"{folder.name}.nfo"
             if nfo_path.exists():
                 continue
-            imdb_id = items_by_title.get(folder.name)
-            if not imdb_id or imdb_id.startswith("unknown_"):
-                # Not in DB — try TMDB lookup so metadata + posters are fetched
-                clean = _clean_for_tmdb(folder.name)
+            m_yr = _YEAR_RE.search(folder.name)
+            year_hint = int(m_yr.group(1)) if m_yr else None
+            clean = _clean_for_tmdb(folder.name)
+
+            # DB lookup: try folder name as-is, then without year, then cleaned title
+            imdb_id = (
+                items_by_title.get(folder.name)
+                or (items_by_title.get(clean) if clean else None)
+                or (items_by_title.get(f"{clean} ({year_hint})") if clean and year_hint else None)
+            )
+            if imdb_id and imdb_id.startswith("unknown_"):
+                imdb_id = None
+
+            if not imdb_id:
                 if not clean:
                     continue
-                m_yr = _YEAR_RE.search(folder.name)
-                year_hint = int(m_yr.group(1)) if m_yr else None
                 try:
                     imdb_id = tmdb.search_movie(clean, year_hint)
                     time.sleep(0.2)
                 except Exception:
                     imdb_id = None
+                if not imdb_id:
+                    # Retry without year hint — some films have wrong year in folder name
+                    try:
+                        imdb_id = tmdb.search_movie(clean, None)
+                        time.sleep(0.2)
+                    except Exception:
+                        imdb_id = None
                 if not imdb_id:
                     continue
             m = _YEAR_RE.search(folder.name)
