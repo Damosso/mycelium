@@ -301,8 +301,9 @@ def _write_strm(path: Path, url: str) -> bool:
     if parent.is_dir():
         for existing in parent.iterdir():
             if existing.is_dir() and existing != path.parent and _norm_title(existing.name) == norm:
-                log.info("Skipping duplicate strm %s — already have %s", path.parent.name, existing.name)
-                return False
+                if any(existing.glob("*.strm")):
+                    log.info("Skipping duplicate strm %s — already have %s", path.parent.name, existing.name)
+                    return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(url, encoding='utf-8')
