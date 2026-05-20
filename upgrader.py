@@ -84,7 +84,7 @@ def run_auto_upgrade() -> int:
             if not better:
                 continue
             log.info("Upgrade candidate for %s: %s → %s", row["title"], row.get("quality"), better.quality)
-            torbox.add_magnet(better.magnet)
+            torbox.add_magnet(better.magnet, reason="upgrade")
             item = torbox.wait_until_ready(better.info_hash)
             if not item:
                 continue
@@ -149,7 +149,7 @@ def run_pack_consolidation() -> int:
                 continue
             log.info("Pack candidate for %s S%02d: %s (%d strms → 1 pack)",
                      title, season, pack.quality, len(strms))
-            torbox.add_magnet(pack.magnet)
+            torbox.add_magnet(pack.magnet, reason="upgrade-pack")
             item = torbox.wait_until_ready(pack.info_hash)
             if not item:
                 continue

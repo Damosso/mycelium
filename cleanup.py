@@ -197,7 +197,7 @@ def _repair_strm(path: Path, run_id: int, mylist: list[dict]) -> str:
     rate_limited = False
     for stream in to_try:
         try:
-            torbox.add_magnet(stream.magnet)
+            torbox.add_magnet(stream.magnet, reason="cleanup-repair")
             torbox.wait_until_ready(stream.info_hash)
             winner = stream
             break

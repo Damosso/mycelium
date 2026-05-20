@@ -363,6 +363,13 @@
       <div class="stat"><div class="stat-val" id="ov-wanted">—</div><div class="stat-lbl">Wanted</div></div>
       <div class="stat"><div class="stat-val" id="ov-success">—</div><div class="stat-lbl">Success 7d</div>
         <div class="stat-sub" id="ov-success-sub"></div></div>
+      <div class="stat"><div class="stat-val" id="ov-torbox-quota">—</div><div class="stat-lbl">TorBox adds 1h</div>
+        <div class="stat-sub" id="ov-torbox-quota-sub"></div></div>
+    </div>
+
+    <div id="quota-breakdown" class="card" style="display:none;margin-bottom:16px">
+      <div class="card-title">⚠ TorBox createtorrent usage (60/hour limit)</div>
+      <div id="quota-breakdown-body" class="dim" style="font-size:12px;font-family:monospace"></div>
     </div>
 
     <div class="section-hdr" style="margin-bottom:12px">
@@ -1168,6 +1175,7 @@
       document.getElementById('ov-wanted').textContent = d.wanted.active;
       document.getElementById('ov-success').textContent = d.requests.success_rate_7d + '%';
       document.getElementById('ov-success-sub').textContent = `${d.requests.succeeded_7d} ok · ${d.requests.failed_7d} fail`;
+      refreshTorboxQuota();
 
       const total = Object.values(d.qualities).reduce((a, b) => a + b, 0) || 1;
       const bars = document.getElementById('quality-bars');
@@ -2033,6 +2041,36 @@
   fetch('/ui/api/watchlist').then(r => r.json()).then(j => {
     dscWatchlistSet = new Set((j.items || []).map(it => it.imdb_id + ':' + it.media_type));
   }).catch(() => {});
+
+  async function refreshTorboxQuota() {
+    try {
+      const r = await fetch('/ui/api/torbox-quota');
+      const q = await r.json();
+      const el = document.getElementById('ov-torbox-quota');
+      const sub = document.getElementById('ov-torbox-quota-sub');
+      if (!el) return;
+      el.textContent = `${q.count}/${q.limit}`;
+      el.style.color = q.count >= q.limit ? 'var(--red)' :
+                       q.count >= q.limit * 0.75 ? 'var(--amber)' : '';
+      if (q.resets_in_sec > 0) {
+        const m = Math.ceil(q.resets_in_sec / 60);
+        sub.textContent = `resets in ~${m}m`;
+      } else {
+        sub.textContent = '';
+      }
+      // Breakdown card — only show when something is consuming the quota
+      const card = document.getElementById('quota-breakdown');
+      const body = document.getElementById('quota-breakdown-body');
+      const reasons = Object.entries(q.by_reason || {}).sort((a, b) => b[1] - a[1]);
+      if (reasons.length && q.count >= q.limit * 0.5) {
+        card.style.display = '';
+        body.innerHTML = reasons.map(([reason, n]) =>
+          `${n.toString().padStart(3)} × ${reason}`).join('<br>');
+      } else {
+        card.style.display = 'none';
+      }
+    } catch (e) { /* ignore */ }
+  }
 
   // ── Radarr / Sonarr import helpers ───────────────────────────────────
   async function arrTest(kind) {

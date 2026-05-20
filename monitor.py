@@ -156,7 +156,7 @@ def _retry_episode(ep: dict) -> None:
     ordered = [s for s in candidates if s.info_hash in cached_hashes] or candidates[:1]
     for stream in ordered:
         try:
-            torbox.add_magnet(stream.magnet)
+            torbox.add_magnet(stream.magnet, reason="seerr-sync")
             torbox.wait_until_ready(stream.info_hash)
             log.info("Monitor: added %s S%02dE%02d", title, season, episode)
             return
@@ -191,7 +191,7 @@ def _search_and_add_season(imdb_id: str, title: str, seasons: list[int]) -> None
         ordered = [s for s in candidates if s.info_hash in cached_hashes] or candidates[:1]
         for stream in ordered:
             try:
-                torbox.add_magnet(stream.magnet)
+                torbox.add_magnet(stream.magnet, reason="seerr-sync")
                 torbox.wait_until_ready(stream.info_hash)
                 log.info("Monitor: added new season %s S%02d", title, season)
                 break

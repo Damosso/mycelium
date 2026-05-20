@@ -123,7 +123,7 @@ def _materialize_locked(token: str) -> str | None:
         rematerialized = True
         log.info("Catbox: re-adding %s (%s)", item["title"], item["info_hash"])
         try:
-            torbox.add_magnet(item["magnet"])
+            torbox.add_magnet(item["magnet"], reason="catbox-replay")
             # On-play path: cached content becomes ready in seconds. Use a short
             # timeout so a mobile client doesn't hang (and fall back to the
             # backdrop) waiting on the default 10-minute poll window.

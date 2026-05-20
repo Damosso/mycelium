@@ -1,5 +1,7 @@
 import logging
+import threading
 import time
+from collections import deque
 
 import requests
 
@@ -17,9 +19,45 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {settings.get('TORBOX_API_KEY', '')}"}
 
 
-def add_magnet(magnet: str, timeout: int = 30) -> dict:
+# ── createtorrent rate-limit visibility ───────────────────────────────────────
+# TorBox limits POST /torrents/createtorrent to 60/hour per API token. We keep a
+# rolling 1-hour log of every call (with the reason / caller) so the UI can show
+# exactly what is consuming the quota.
+_CREATETORRENT_LOG: deque = deque(maxlen=200)
+_CREATETORRENT_LOCK = threading.Lock()
+
+
+def _record_createtorrent(reason: str) -> None:
+    now = time.time()
+    with _CREATETORRENT_LOCK:
+        _CREATETORRENT_LOG.append((now, reason))
+
+
+def createtorrent_usage(window_sec: int = 3600) -> dict:
+    """Return how many createtorrent calls happened in the last `window_sec`,
+    broken down by reason. Used by the UI to explain rate-limit hits."""
+    cutoff = time.time() - window_sec
+    with _CREATETORRENT_LOCK:
+        recent = [(ts, reason) for ts, reason in _CREATETORRENT_LOG if ts >= cutoff]
+    by_reason: dict[str, int] = {}
+    for _, reason in recent:
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+    oldest = min((ts for ts, _ in recent), default=None)
+    return {
+        "count": len(recent),
+        "limit": 60,
+        "window_sec": window_sec,
+        "by_reason": by_reason,
+        "oldest_ts": oldest,
+        "resets_in_sec": int(oldest + window_sec - time.time()) if oldest else 0,
+    }
+
+
+def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
     url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/createtorrent"
-    log.info("Adding magnet to Torbox: %s", magnet[:80])
+    _record_createtorrent(reason)
+    usage = createtorrent_usage()
+    log.info("createtorrent [%s] (%d/60 this hour): %s", reason, usage["count"], magnet[:80])
     resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
     resp.raise_for_status()
     payload = resp.json() or {}

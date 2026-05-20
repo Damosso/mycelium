@@ -749,7 +749,7 @@ def ui_add_magnet():
         flash("Not a magnet link", "err")
         return redirect(url_for("ui_dashboard") + "#search")
     try:
-        torbox.add_magnet(magnet)
+        torbox.add_magnet(magnet, reason="manual")
         flash("Magnet added to TorBox — rescan will create .strm shortly", "ok")
         threading.Thread(target=strm_generator.run_and_refresh, name="strm-after-add", daemon=True).start()
     except Exception as exc:
@@ -1242,6 +1242,13 @@ def ui_api_user_request_deny(req_id: int):
 
 
 # ── User management (admin) ──────────────────────────────────────────────────
+
+@app.get("/ui/api/torbox-quota")
+def ui_api_torbox_quota():
+    """createtorrent usage in the last hour, broken down by reason — explains
+    why TorBox 429 rate limits are being hit."""
+    return jsonify(torbox.createtorrent_usage())
+
 
 @app.get("/ui/api/session")
 def ui_api_session():

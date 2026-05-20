@@ -79,7 +79,7 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
     instead of blacklisting an otherwise-good torrent."""
     for attempt in range(2):
         try:
-            torbox.add_magnet(stream.magnet)
+            torbox.add_magnet(stream.magnet, reason="processor")
             torbox.wait_until_ready(stream.info_hash)
             return True
         except Exception as exc:
