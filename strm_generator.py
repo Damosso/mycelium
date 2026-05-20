@@ -1,8 +1,11 @@
 import logging
 import re
+import threading
 from pathlib import Path
 
 import requests as req_lib
+
+_maintenance_lock = threading.Lock()  # prevents migrate + repair running simultaneously
 
 import db
 import jellyfin
@@ -601,6 +604,8 @@ def migrate_to_canonical_names() -> dict:
     """One-time migration: rename all movie folders to TMDB canonical names
     and merge duplicate folders that share the same imdb_id.
 
+    Acquires _maintenance_lock so repair cannot run simultaneously.
+
     Rules:
     - imdb_id is the key (read from .nfo files)
     - Canonical name = TMDB title + year; falls back to current name if TMDB fails
@@ -610,6 +615,19 @@ def migrate_to_canonical_names() -> dict:
 
     Returns: {scanned, renamed, merged, skipped, errors, no_imdb}
     """
+    import re as _re
+    import shutil
+
+    if not _maintenance_lock.acquire(blocking=False):
+        log.warning("migrate_to_canonical_names: maintenance already running — skipping")
+        return {"scanned": 0, "renamed": 0, "merged": 0, "skipped": 0, "errors": 0, "no_imdb": 0}
+    try:
+        return _migrate_to_canonical_names_locked()
+    finally:
+        _maintenance_lock.release()
+
+
+def _migrate_to_canonical_names_locked() -> dict:
     import re as _re
     import shutil
 
@@ -755,6 +773,17 @@ def repair_expired_strms(media_type: str = "movie") -> dict:
          so it gets a fresh catbox token on the next pass.
     Returns a summary dict with counts.
     """
+    if not _maintenance_lock.acquire(blocking=False):
+        log.warning("repair_expired_strms: maintenance already running — skipping")
+        return {"scanned": 0, "ok": 0, "missing_strm": 0, "orphaned_tokens": 0,
+                "relinked": 0, "requeued": 0, "skipped": 0}
+    try:
+        return _repair_expired_strms_locked(media_type)
+    finally:
+        _maintenance_lock.release()
+
+
+def _repair_expired_strms_locked(media_type: str = "movie") -> dict:
     import re as _re
     import catbox as _catbox
     from config import CATBOX_HOST
