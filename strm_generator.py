@@ -551,17 +551,19 @@ def run_and_refresh() -> None:
 
 
 def repair_expired_strms(media_type: str = "movie") -> dict:
-    """Find .strm files with broken or missing catbox tokens and repair them.
+    """Find and fix all unplayable movie entries.
 
-    Two kinds of breakage:
-    1. Direct TorBox CDN URL (not a catbox proxy) — expired after ~24h.
-    2. Catbox proxy URL whose token is NOT in virtual_items DB — 404 on play.
+    Three kinds of breakage handled:
+    1. Movie folder exists but has NO .strm file at all (NFO/poster present,
+       added via generate-nfos before processor ran or after .strm was lost).
+    2. Direct TorBox CDN URL in .strm — expired after ~24h.
+    3. Catbox proxy URL whose token is NOT in virtual_items DB — 404 on play.
 
-    For each broken file:
-      1. Read imdb_id from the .nfo sidecar.
-      2. If a virtual_item exists for that imdb_id → rewrite the .strm to
-         point at the correct catbox proxy URL.
-      3. Otherwise → delete the .strm and immediately requeue via processor.
+    Repair strategy for each broken item:
+      a. If a virtual_item exists for that imdb_id → write/rewrite the .strm
+         to point at the correct catbox proxy URL.
+      b. Otherwise → delete the broken .strm (if any) and requeue via processor
+         so it gets a fresh catbox token on the next pass.
     Returns a summary dict with counts.
     """
     import re as _re
@@ -571,14 +573,86 @@ def repair_expired_strms(media_type: str = "movie") -> dict:
 
     media = Path(MEDIA_PATH)
     sub = "movies" if media_type == "movie" else "series"
-    folder = media / sub
-    if not folder.is_dir():
-        return {"scanned": 0, "ok": 0, "relinked": 0, "deleted": 0, "skipped": 0,
-                "orphaned_tokens": 0}
+    root = media / sub
+    if not root.is_dir():
+        return {"scanned": 0, "ok": 0, "missing_strm": 0, "orphaned_tokens": 0,
+                "relinked": 0, "requeued": 0, "skipped": 0}
 
-    scanned = ok = relinked = deleted = skipped = orphaned = 0
+    scanned = ok = missing = orphaned = relinked = requeued = skipped = 0
 
-    for strm_path in folder.rglob("*.strm"):
+    def _nfo_imdb(folder: Path) -> str | None:
+        for nfo in folder.glob("*.nfo"):
+            try:
+                text = nfo.read_text(encoding="utf-8", errors="ignore")
+                m = _re.search(
+                    r"<imdbid>(tt\d+)</imdbid>"
+                    r"|<uniqueid[^>]*type=['\"]imdb['\"][^>]*>(tt\d+)</uniqueid>"
+                    r"|(tt\d{7,})",
+                    text,
+                )
+                if m:
+                    return next(g for g in m.groups() if g)
+            except Exception:
+                pass
+        return None
+
+    def _requeue(imdb_id: str, title: str, strm_path: Path | None) -> None:
+        """Delete broken .strm (if any) and kick off processor."""
+        if strm_path and strm_path.exists():
+            try:
+                strm_path.unlink()
+            except Exception:
+                pass
+        try:
+            import processor as _proc
+            from webhook_parser import MediaRequest as _MR
+            import threading as _t
+            req = _MR(title=title, media_type=media_type, imdb_id=imdb_id, seasons=[])
+            _t.Thread(target=_proc.process, args=(req,),
+                      name=f"repair-{imdb_id}", daemon=True).start()
+        except Exception as exc:
+            log.warning("repair_strms: requeue failed for %s: %s", imdb_id, exc)
+
+    def _relink(imdb_id: str, strm_path: Path) -> bool:
+        """Write/rewrite strm_path to the catbox proxy URL for imdb_id. Returns True on success."""
+        items = db.get_virtual_items_by_imdb(imdb_id, media_type)
+        if not items:
+            return False
+        item = next((i for i in items if i.get("strm_path") == str(strm_path)), items[0])
+        new_url = _catbox.proxy_url(item["token"])
+        try:
+            strm_path.parent.mkdir(parents=True, exist_ok=True)
+            strm_path.write_text(new_url, encoding="utf-8")
+            log.info("repair_strms: wrote %s → token %s", strm_path.name, item["token"])
+            return True
+        except Exception as exc:
+            log.warning("repair_strms: could not write %s: %s", strm_path, exc)
+            return False
+
+    # ── Pass 1: folders with NO .strm file ────────────────────────────────────
+    for movie_dir in root.iterdir():
+        if not movie_dir.is_dir():
+            continue
+        strms = list(movie_dir.glob("*.strm"))
+        if strms:
+            continue  # has at least one .strm — handled in pass 2
+        # No .strm — check if there's a .nfo we can use to requeue
+        imdb_id = _nfo_imdb(movie_dir)
+        if not imdb_id:
+            log.debug("repair_strms: no .nfo imdb_id in %s — skipping", movie_dir.name)
+            skipped += 1
+            continue
+        missing += 1
+        expected_strm = movie_dir / f"{movie_dir.name}.strm"
+        if _relink(imdb_id, expected_strm):
+            relinked += 1
+        else:
+            log.info("repair_strms: no virtual_item for %s — requeuing", movie_dir.name)
+            _requeue(imdb_id, movie_dir.name, None)
+            requeued += 1
+
+    # ── Pass 2: existing .strm files that are broken ──────────────────────────
+    for strm_path in root.rglob("*.strm"):
         scanned += 1
         try:
             url = strm_path.read_text(encoding="utf-8").strip()
@@ -586,77 +660,39 @@ def repair_expired_strms(media_type: str = "movie") -> dict:
             skipped += 1
             continue
 
-        # Catbox proxy URL — verify the token actually exists in virtual_items.
+        # Valid catbox proxy URL — verify token is in DB.
         if url.startswith(catbox_base):
             m = _re.search(r"/stream/([a-f0-9]{16})$", url)
             token = m.group(1) if m else None
             if token and db.get_virtual_item(token):
                 ok += 1
                 continue
-            # Token missing from DB — treat as broken (fall through to repair).
             orphaned += 1
-            log.warning("repair_strms: orphaned token %s in %s — repairing", token, strm_path.name)
+            log.warning("repair_strms: orphaned token %s in %s", token, strm_path.name)
+            # Fall through to repair below.
 
-        # Direct TorBox URL (or any non-proxy URL) — needs repair.
         movie_folder = strm_path.parent
-
-        # Try to find imdb_id from .nfo
-        imdb_id: str | None = None
-        for nfo_file in movie_folder.glob("*.nfo"):
-            try:
-                text = nfo_file.read_text(encoding="utf-8", errors="ignore")
-                import re as _re
-                m = _re.search(r"<imdbid>(tt\d+)</imdbid>|<uniqueid[^>]*type=['\"]imdb['\"][^>]*>(tt\d+)</uniqueid>|(tt\d{7,})", text)
-                if m:
-                    imdb_id = next(g for g in m.groups() if g)
-                    break
-            except Exception:
-                continue
-
+        imdb_id = _nfo_imdb(movie_folder)
         if not imdb_id:
-            log.warning("repair_strms: no imdb_id found for %s — skipping", strm_path)
+            log.warning("repair_strms: no imdb_id for %s — skipping", strm_path)
             skipped += 1
             continue
 
-        # Check if a virtual_item already exists for this imdb_id.
-        items = db.get_virtual_items_by_imdb(imdb_id, media_type)
-        if items:
-            # Pick the item whose strm_path matches this file (or the first one).
-            item = next((i for i in items if i.get("strm_path") == str(strm_path)), items[0])
-            import catbox as _catbox
-            new_url = _catbox.proxy_url(item["token"])
-            try:
-                strm_path.write_text(new_url, encoding="utf-8")
-                log.info("repair_strms: relinked %s → catbox token %s", strm_path.name, item["token"])
-                relinked += 1
-            except Exception as exc:
-                log.warning("repair_strms: could not rewrite %s: %s", strm_path, exc)
-                skipped += 1
+        if _relink(imdb_id, strm_path):
+            relinked += 1
         else:
-            # No virtual_item — delete so processor can recreate it, then re-queue.
-            try:
-                title = movie_folder.name
-                strm_path.unlink()
-                log.info("repair_strms: deleted expired strm %s (imdb=%s)", strm_path.name, imdb_id)
-                deleted += 1
-                # Re-queue via processor so it gets a catbox token on the next pass.
-                try:
-                    import processor as _proc
-                    from webhook_parser import MediaRequest as _MR
-                    req = _MR(title=title, media_type=media_type, imdb_id=imdb_id, seasons=[])
-                    import threading as _t
-                    _t.Thread(target=_proc.process, args=(req,),
-                              name=f"repair-{imdb_id}", daemon=True).start()
-                except Exception as exc2:
-                    log.warning("repair_strms: requeue failed for %s: %s", imdb_id, exc2)
-            except Exception as exc:
-                log.warning("repair_strms: could not delete %s: %s", strm_path, exc)
-                skipped += 1
+            _requeue(imdb_id, movie_folder.name, strm_path)
+            requeued += 1
 
-    log.info("repair_strms: scanned=%d ok=%d orphaned=%d relinked=%d deleted=%d skipped=%d",
-             scanned, ok, orphaned, relinked, deleted, skipped)
-    return {"scanned": scanned, "ok": ok, "orphaned_tokens": orphaned,
-            "relinked": relinked, "deleted": deleted, "skipped": skipped}
+    log.info(
+        "repair_strms: missing=%d ok=%d orphaned=%d relinked=%d requeued=%d skipped=%d",
+        missing, ok, orphaned, relinked, requeued, skipped,
+    )
+    return {
+        "scanned": scanned, "ok": ok, "missing_strm": missing,
+        "orphaned_tokens": orphaned, "relinked": relinked,
+        "requeued": requeued, "skipped": skipped,
+    }
 
 
 def _self_heal_sample(sample_size: int = 10) -> None:
