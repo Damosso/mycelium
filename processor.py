@@ -78,6 +78,13 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
     when the hourly createtorrent budget is gone, so the request is rescheduled
     rather than wasting the quota or marking a good torrent bad. We do NOT retry
     a 429 inline — the hourly window won't reset in seconds."""
+    # Skip createtorrent entirely if this hash is already in our TorBox library —
+    # re-adding it would waste a 60/hour quota slot for content we already have.
+    existing = torbox.find_by_hash(stream.info_hash)
+    if existing and torbox._is_ready(existing):
+        log.info("Already in TorBox library (id=%s) — skipping createtorrent for %s",
+                 existing.get("id"), label)
+        return True
     try:
         torbox.add_magnet(stream.magnet, reason="processor")
         torbox.wait_until_ready(stream.info_hash)

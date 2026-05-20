@@ -119,6 +119,17 @@ def _materialize_locked(token: str) -> str | None:
             torbox_id = None
             rematerialized = True
 
+    # Before spending a createtorrent slot, check whether the torrent is still
+    # in our TorBox library under its hash (TorBox keeps cached items ~30 days,
+    # so an "evicted" torbox_id may still resolve to a live torrent).
+    if not torbox_id:
+        existing = torbox.find_by_hash(item["info_hash"])
+        if existing and torbox._is_ready(existing):
+            torbox_id = existing["id"]
+            db.update_virtual_torbox_id(token, torbox_id)
+            log.info("Catbox: %s still in library (id=%s) — no re-add needed",
+                     item["title"], torbox_id)
+
     if not torbox_id:
         rematerialized = True
         log.info("Catbox: re-adding %s (%s)", item["title"], item["info_hash"])
