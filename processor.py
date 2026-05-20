@@ -19,6 +19,10 @@ from webhook_parser import MediaRequest
 
 log = logging.getLogger(__name__)
 
+# Transient per-imdb failure reasons captured during a process() call, surfaced
+# into the requests.error column so the UI can show why something failed.
+_LAST_FAIL_REASON: dict[str, str] = {}
+
 
 def _rank(streams, prefer_season_pack: bool = False, override: dict | None = None):
     return torrentio.rank_streams(streams, prefer_season_pack=prefer_season_pack, override=override)
@@ -118,6 +122,7 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
     candidates = _fetch_movie_candidates(req)
     if not candidates:
         log.error("No suitable stream for movie %s (%s)", req.title, req.imdb_id)
+        _LAST_FAIL_REASON[req.imdb_id] = "no releases found on Zilean/Torrentio"
         return False, None
     log.info("Trying %d candidate(s) for %s", len(candidates), req.title)
     ok, winner = _add_best_from(candidates, req.title)
@@ -128,6 +133,10 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
     fallback = _try_realdebrid_fallback(req.title, candidates)
     if fallback:
         return True, fallback
+    _LAST_FAIL_REASON[req.imdb_id] = (
+        f"{len(candidates)} release(s) found but none could be added to TorBox "
+        f"(not cached / rate limited)"
+    )
     return False, None
 
 
@@ -332,9 +341,10 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
             except Exception as exc:
                 log.debug("metrics_prom (quality) failed: %s", exc)
     else:
-        db.update_request(row_id, "failed")
-        log.warning("No content added; skipping Jellyfin refresh for %s", req.title)
-        db.log_activity("failed", req.title, f"no suitable stream found for {req.imdb_id}", False)
+        reason = _LAST_FAIL_REASON.pop(req.imdb_id, None) or "no suitable stream found"
+        db.update_request(row_id, "failed", error=reason)
+        log.warning("No content added (%s); skipping Jellyfin refresh for %s", reason, req.title)
+        db.log_activity("failed", req.title, f"{reason} ({req.imdb_id})", False)
         notify.send(f"Failed: {req.title}", f"No suitable stream found · {req.imdb_id}", False)
         db.record_metric("request_failed", req.media_type, value_int=1)
         try:

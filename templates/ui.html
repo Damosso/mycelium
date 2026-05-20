@@ -615,7 +615,12 @@
             <td><a href="https://www.imdb.com/title/{{ r.imdb_id }}" target="_blank">{{ r.imdb_id }}</a></td>
             <td class="dim">{{ r.media_type }}</td>
             <td class="dim">{{ r.seasons or '—' }}</td>
-            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+            <td>
+              <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+              {% if r.status == 'failed' and r.error %}
+              <span class="dim" style="display:block;font-size:10px;margin-top:3px;max-width:220px" title="{{ r.error }}">{{ r.error[:60] }}{% if r.error|length > 60 %}…{% endif %}</span>
+              {% endif %}
+            </td>
             <td class="mono">{{ r.quality or '—' }}</td>
             <td class="dim">{{ r.source or '—' }}</td>
             <td class="dim">{{ r.created_at }}</td>
