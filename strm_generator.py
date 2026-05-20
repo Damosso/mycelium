@@ -427,8 +427,35 @@ def create_movie_strm_from_url(title: str, url: str) -> Path | None:
         return None
 
 
+def _run_once_catbox() -> int:
+    """Catbox mode: rebuild any .strm files that are missing from disk.
+
+    virtual_items is the source of truth — torrents are not in TorBox when
+    idle-released, so scanning mylist would find nothing.
+    """
+    import catbox
+    items = db.get_all_virtual_items()
+    recreated = 0
+    for item in items:
+        strm_path = item.get("strm_path")
+        if not strm_path:
+            continue
+        path = Path(strm_path)
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if _write_strm(path, catbox.proxy_url(item["token"])):
+            log.info("Recreated missing catbox .strm: %s", path.name)
+            recreated += 1
+    log.info("strm_generator catbox: %d missing .strm file(s) recreated from virtual_items", recreated)
+    return recreated
+
+
 def run_once() -> int:
-    """Scan entire TorBox mylist and create any missing .strm files. Returns new file count."""
+    """Create any missing .strm files. In catbox mode uses virtual_items DB as
+    source of truth; otherwise scans TorBox mylist."""
+    if settings.get("CATBOX_MODE", False):
+        return _run_once_catbox()
     log.info("strm_generator: scanning TorBox mylist")
     try:
         torrents = torbox_mod.list_torrents()
