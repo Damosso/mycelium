@@ -31,6 +31,28 @@ ON_PLAY_READY_TIMEOUT_SEC = 45  # max wait on-play before giving up (cached = se
 _url_cache: dict[str, tuple[str, float]] = {}
 _url_cache_lock = threading.Lock()
 
+# Failure cooldown: after a failed materialize (429, timeout, no file found),
+# block retries for a short window so Jellyfin's burst of probe requests doesn't
+# hammer TorBox with repeated createtorrent calls.
+_FAIL_COOLDOWN_SEC = 30        # standard failure (readd blocked, no file)
+_FAIL_COOLDOWN_429_SEC = 120   # TorBox 429 — back off longer
+_fail_cache: dict[str, float] = {}  # token → expiry monotonic timestamp
+_fail_cache_lock = threading.Lock()
+
+def _fail_get(token: str) -> bool:
+    with _fail_cache_lock:
+        exp = _fail_cache.get(token)
+        if exp is None:
+            return False
+        if exp > time.monotonic():
+            return True
+        del _fail_cache[token]
+        return False
+
+def _fail_put(token: str, ttl: int = _FAIL_COOLDOWN_SEC) -> None:
+    with _fail_cache_lock:
+        _fail_cache[token] = time.monotonic() + ttl
+
 _token_locks: dict[str, threading.Lock] = {}
 _token_locks_lock = threading.Lock()
 
@@ -123,17 +145,26 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
         db.touch_virtual_item(token)
         return cached
 
+    # Respect failure cooldown — don't spam TorBox after a recent failed attempt.
+    if _fail_get(token):
+        return None
+
     if allow_readd is None:
         allow_readd = not _is_scan_burst(token)
 
     with _token_lock(token):
+        # Re-check inside the lock: another thread may have succeeded or set cooldown.
         cached = _cache_get(token)
         if cached:
             db.touch_virtual_item(token)
             return cached
+        if _fail_get(token):
+            return None
         url = _materialize_locked(token, allow_readd=allow_readd)
         if url:
             _cache_put(token, url)
+        else:
+            _fail_put(token)
         return url
 
 
@@ -185,11 +216,14 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             live = torbox.wait_until_ready(item["info_hash"], timeout=ON_PLAY_READY_TIMEOUT_SEC)
             if not live:
                 log.error("Catbox: torrent never became ready: %s", item["info_hash"])
+                _fail_put(token, _FAIL_COOLDOWN_SEC)
                 return None
             torbox_id = live["id"]
             db.update_virtual_torbox_id(token, torbox_id)
         except Exception as exc:
+            is_429 = "429" in str(exc)
             log.error("Catbox: add_magnet failed for %s: %s", token, exc)
+            _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
             return None
 
     file_id = item["file_id"]
