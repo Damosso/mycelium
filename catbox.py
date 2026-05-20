@@ -40,6 +40,18 @@ _FAIL_COOLDOWN_429_SEC = 120   # TorBox 429 — back off longer
 _fail_cache: dict[str, float] = {}  # token → expiry monotonic timestamp
 _fail_cache_lock = threading.Lock()
 
+# ── Reason codes (structured, for playability_state + admin UI) ───────────────
+REASON_UNKNOWN_TOKEN    = "UNKNOWN_TOKEN"
+REASON_NO_IMDB          = "NO_IMDB"
+REASON_TORRENTIO_EMPTY  = "TORRENTIO_EMPTY"
+REASON_NO_CACHED        = "NO_CACHED_RELEASE"
+REASON_WAIT_TIMEOUT     = "WAIT_TIMEOUT"
+REASON_NO_FILE          = "NO_FILE"
+REASON_RD_429           = "RD_429"
+REASON_TB_429           = "TB_429"
+REASON_ADD_FAILED       = "ADD_FAILED"
+REASON_SEARCH_ERROR     = "SEARCH_UNAVAILABLE"
+
 def _fail_get(token: str) -> bool:
     with _fail_cache_lock:
         exp = _fail_cache.get(token)
@@ -89,6 +101,16 @@ def _token_lock(token: str) -> threading.Lock:
             lock = threading.Lock()
             _token_locks[token] = lock
         return lock
+
+
+def _content_key(item: dict) -> str | None:
+    imdb_id = item.get("imdb_id")
+    if not imdb_id:
+        return None
+    season, episode = item.get("season"), item.get("episode")
+    if season and episode:
+        return f"{imdb_id}:S{season:02d}E{episode:02d}"
+    return imdb_id
 
 
 def _cache_get(token: str) -> str | None:
@@ -195,6 +217,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         _metrics_inc("failed")
         return None
 
+    ckey = _content_key(item)
     debrid_provider = (item.get("debrid_provider") or "torbox").lower()
     rematerialized = False
 
@@ -210,6 +233,8 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 url = _rd_get_url(item, rd_id)
                 if url:
                     db.touch_virtual_item(token)
+                    if ckey:
+                        db.update_playability_ok(ckey, "realdebrid")
                     _metrics_inc("ok" if not rematerialized else "rematerialized")
                     return url
             log.info("Catbox/RD: %s no longer in RD library — will re-add", item["title"])
@@ -226,11 +251,15 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         fresh = _search_best_cached_release(item)
         if fresh is _SEARCH_UNAVAILABLE:
             _fail_put(token, _FAIL_COOLDOWN_SEC)
+            if ckey:
+                db.update_playability_fail(ckey, REASON_SEARCH_ERROR)
             return None
         if not fresh:
             log.error("Catbox/RD: no cached release for %s — keeping .strm, retry in 6h",
                       item["title"])
             _fail_put(token, 21600)  # 6h — repair job will clean up if truly dead
+            if ckey:
+                db.update_playability_fail(ckey, REASON_NO_CACHED)
             return None
 
         new_hash, new_magnet, provider = fresh
@@ -250,17 +279,23 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 if not rd_info:
                     log.error("Catbox/RD: wait_until_ready timed out for %s", item["title"])
                     _fail_put(token, _FAIL_COOLDOWN_SEC)
+                    if ckey:
+                        db.update_playability_fail(ckey, REASON_WAIT_TIMEOUT)
                     return None
                 db.update_virtual_rd_id(token, rd_id)
                 url = _rd_get_url(item, rd_id)
                 if url:
                     db.touch_virtual_item(token)
+                    if ckey:
+                        db.update_playability_ok(ckey, "realdebrid")
                     _metrics_inc("rematerialized")
                 return url
             except Exception as exc:
                 is_429 = "429" in str(exc)
                 log.error("Catbox/RD: add_magnet failed for %s: %s", item["title"], exc)
                 _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
+                if ckey:
+                    db.update_playability_fail(ckey, REASON_RD_429 if is_429 else REASON_ADD_FAILED)
                 return None
 
     # ── TorBox path ───────────────────────────────────────────────────────────
@@ -303,10 +338,14 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                         url = _rd_get_url(item, rd_id)
                         if url:
                             db.touch_virtual_item(token)
+                            if ckey:
+                                db.update_playability_ok(ckey, "realdebrid")
                             _metrics_inc("rematerialized")
                             return url
                     log.error("Catbox: RD wait_until_ready timed out for %s", item["title"])
                     _fail_put(token, _FAIL_COOLDOWN_SEC)
+                    if ckey:
+                        db.update_playability_fail(ckey, REASON_WAIT_TIMEOUT)
                     return None
         except Exception as exc:
             log.warning("Catbox: RD known-hash check failed for %s: %s", item["title"], exc)
@@ -321,11 +360,15 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         fresh = _search_best_cached_release(item)
         if fresh is _SEARCH_UNAVAILABLE:
             _fail_put(token, _FAIL_COOLDOWN_SEC)
+            if ckey:
+                db.update_playability_fail(ckey, REASON_SEARCH_ERROR)
             return None
         if not fresh:
             log.error("Catbox: no cached release found for %s — keeping .strm, retry in 6h",
                       item["title"])
             _fail_put(token, 21600)  # 6h — repair job will clean up if truly dead
+            if ckey:
+                db.update_playability_fail(ckey, REASON_NO_CACHED)
             return None
 
         new_hash, new_magnet, provider = fresh
@@ -340,18 +383,24 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 rd_info = _rd.wait_until_ready(rd_id)
                 if not rd_info:
                     _fail_put(token, _FAIL_COOLDOWN_SEC)
+                    if ckey:
+                        db.update_playability_fail(ckey, REASON_WAIT_TIMEOUT)
                     return None
                 db.update_virtual_rd_id(token, rd_id)
                 item["rd_id"] = rd_id
                 url = _rd_get_url(item, rd_id)
                 if url:
                     db.touch_virtual_item(token)
+                    if ckey:
+                        db.update_playability_ok(ckey, "realdebrid")
                     _metrics_inc("rematerialized")
                 return url
             except Exception as exc:
                 is_429 = "429" in str(exc)
                 log.error("Catbox: RD add_magnet failed for %s: %s", item["title"], exc)
                 _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
+                if ckey:
+                    db.update_playability_fail(ckey, REASON_RD_429 if is_429 else REASON_ADD_FAILED)
                 return None
 
         if new_hash != (item.get("info_hash") or "").lower():
@@ -367,6 +416,8 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 log.error("Catbox: fresh release not ready for %s — keeping .strm, retry soon",
                           item["title"])
                 _fail_put(token, _FAIL_COOLDOWN_SEC)
+                if ckey:
+                    db.update_playability_fail(ckey, REASON_WAIT_TIMEOUT)
                 return None
             torbox_id = live["id"]
             db.update_virtual_torbox_id(token, torbox_id)
@@ -374,6 +425,8 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             is_429 = "429" in str(exc)
             log.error("Catbox: add_magnet failed for %s: %s", token, exc)
             _fail_put(token, _FAIL_COOLDOWN_429_SEC if is_429 else _FAIL_COOLDOWN_SEC)
+            if ckey:
+                db.update_playability_fail(ckey, REASON_TB_429 if is_429 else REASON_ADD_FAILED)
             return None
 
     file_id = item["file_id"]
@@ -405,12 +458,16 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
     if not file_id:
         log.error("Catbox: no playable file found for %s — removing from library", token)
         _remove_strm(item)
+        if ckey:
+            db.update_playability_fail(ckey, REASON_NO_FILE)
         return None
 
     import strm_generator
     url = strm_generator._get_stream_url(torbox_id, file_id)
     if url:
         db.touch_virtual_item(token)
+        if ckey:
+            db.update_playability_ok(ckey, "torbox")
         _metrics_inc("rematerialized" if rematerialized else "ok")
     else:
         _metrics_inc("failed")

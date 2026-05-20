@@ -271,6 +271,18 @@ CREATE TABLE IF NOT EXISTS wanted_movies (
     added_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
     last_checked TEXT
 );
+
+CREATE TABLE IF NOT EXISTS playability_state (
+    content_key          TEXT    PRIMARY KEY,
+    status               TEXT    NOT NULL DEFAULT 'unknown',
+    last_ok_provider     TEXT,
+    last_ok_at           TEXT,
+    last_fail_reason     TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    updated_at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_playability_status ON playability_state(status, updated_at);
 """
 
 
@@ -343,9 +355,10 @@ def vacuum() -> None:
 
 _PRUNE_TARGETS: dict[str, str] = {
     # table_name : timestamp_column. Whitelist so the table name never comes from input.
-    "activity_log":   "created_at",
-    "webhook_events": "received_at",
-    "metric_events":  "created_at",
+    "activity_log":     "created_at",
+    "webhook_events":   "received_at",
+    "metric_events":    "created_at",
+    "playability_state": "updated_at",
 }
 
 
@@ -1273,3 +1286,79 @@ def touch_wanted_movie(imdb_id: str) -> None:
                WHERE imdb_id=?""",
             (imdb_id,),
         )
+
+
+# ── playability_state ─────────────────────────────────────────────────────────
+
+def get_playability_state(content_key: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM playability_state WHERE content_key=?", (content_key,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_playability_ok(content_key: str, provider: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO playability_state
+               (content_key, status, last_ok_provider, last_ok_at, consecutive_failures, updated_at)
+               VALUES (?, 'playable', ?, strftime('%Y-%m-%d %H:%M:%S','now'), 0,
+                       strftime('%Y-%m-%d %H:%M:%S','now'))
+               ON CONFLICT(content_key) DO UPDATE SET
+                 status='playable',
+                 last_ok_provider=excluded.last_ok_provider,
+                 last_ok_at=excluded.last_ok_at,
+                 consecutive_failures=0,
+                 updated_at=excluded.updated_at""",
+            (content_key, provider),
+        )
+        conn.commit()
+
+
+def update_playability_fail(content_key: str, reason: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO playability_state
+               (content_key, status, last_fail_reason, consecutive_failures, updated_at)
+               VALUES (?, 'degraded', ?, 1, strftime('%Y-%m-%d %H:%M:%S','now'))
+               ON CONFLICT(content_key) DO UPDATE SET
+                 status='degraded',
+                 last_fail_reason=excluded.last_fail_reason,
+                 consecutive_failures=consecutive_failures + 1,
+                 updated_at=excluded.updated_at""",
+            (content_key, reason),
+        )
+        conn.commit()
+
+
+def reset_playability_state(content_key: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO playability_state (content_key, status, consecutive_failures, updated_at)
+               VALUES (?, 'unknown', 0, strftime('%Y-%m-%d %H:%M:%S','now'))
+               ON CONFLICT(content_key) DO UPDATE SET
+                 status='unknown',
+                 consecutive_failures=0,
+                 last_fail_reason=NULL,
+                 updated_at=excluded.updated_at""",
+            (content_key,),
+        )
+        conn.commit()
+
+
+def get_degraded_items(min_failures: int = 3) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT ps.*, vi.title, vi.token, vi.strm_path
+               FROM playability_state ps
+               LEFT JOIN virtual_items vi ON (
+                   vi.imdb_id = ps.content_key
+                   OR ps.content_key LIKE vi.imdb_id || ':%'
+               )
+               WHERE ps.status='degraded' AND ps.consecutive_failures >= ?
+               ORDER BY ps.consecutive_failures DESC, ps.updated_at DESC
+               LIMIT 100""",
+            (min_failures,),
+        ).fetchall()
+        return [dict(r) for r in rows]
