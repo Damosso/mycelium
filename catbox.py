@@ -34,6 +34,30 @@ _url_cache_lock = threading.Lock()
 _token_locks: dict[str, threading.Lock] = {}
 _token_locks_lock = threading.Lock()
 
+# ── scan/probe burst detection ────────────────────────────────────────────────
+# A media-server library scan opens many DISTINCT .strm URLs in a short burst,
+# whereas real playback touches a single token (plus seeks on that same token).
+# When we see a burst of distinct tokens we treat the requests as scan probes and
+# refuse to re-add idle-released torrents — re-materializing the whole library on
+# every scan is slow and churns TorBox's createtorrent quota. Items already live
+# in TorBox still resolve cheaply (mylist is cached), so they probe fine.
+_SCAN_WINDOW_SEC = 25
+_SCAN_DISTINCT_THRESHOLD = 4
+_recent_tokens: dict[str, float] = {}
+_recent_lock = threading.Lock()
+
+
+def _is_scan_burst(token: str) -> bool:
+    """Record this token request and report whether we appear to be inside a
+    library-scan burst (many distinct tokens within the recent window)."""
+    now = time.monotonic()
+    with _recent_lock:
+        for t, ts in list(_recent_tokens.items()):
+            if now - ts > _SCAN_WINDOW_SEC:
+                del _recent_tokens[t]
+        _recent_tokens[token] = now
+        return len(_recent_tokens) >= _SCAN_DISTINCT_THRESHOLD
+
 
 def _token_lock(token: str) -> threading.Lock:
     with _token_locks_lock:
@@ -80,27 +104,35 @@ def register(info_hash: str, magnet: str, title: str, media_type: str,
     return token
 
 
-def materialize(token: str) -> str | None:
+def materialize(token: str, allow_readd: bool | None = None) -> str | None:
     """Ensure the torrent is in TorBox and return a fresh stream URL.
-    Cached URLs are served for up to 5 minutes to absorb Jellyfin's probe/seek
-    bursts without spending TorBox createtorrent rate-limit slots."""
+    Cached URLs are served for up to 30 minutes to absorb Jellyfin's probe/seek
+    bursts without spending TorBox createtorrent rate-limit slots.
+
+    allow_readd controls whether an idle-released torrent may be re-added (which
+    can block ~45s waiting for it to become ready). When None (default), it is
+    auto-decided: during a scan-burst we skip the re-add so the scan stays fast.
+    """
     cached = _cache_get(token)
     if cached:
         db.touch_virtual_item(token)
         return cached
+
+    if allow_readd is None:
+        allow_readd = not _is_scan_burst(token)
 
     with _token_lock(token):
         cached = _cache_get(token)
         if cached:
             db.touch_virtual_item(token)
             return cached
-        url = _materialize_locked(token)
+        url = _materialize_locked(token, allow_readd=allow_readd)
         if url:
             _cache_put(token, url)
         return url
 
 
-def _materialize_locked(token: str) -> str | None:
+def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
     item = db.get_virtual_item(token)
     if not item:
         log.warning("Catbox: unknown token %s", token)
@@ -129,6 +161,13 @@ def _materialize_locked(token: str) -> str | None:
             db.update_virtual_torbox_id(token, torbox_id)
             log.info("Catbox: %s still in library (id=%s) — no re-add needed",
                      item["title"], torbox_id)
+
+    if not torbox_id and not allow_readd:
+        # Scan/probe burst: don't pay the re-add + ready-wait cost just so a
+        # library scan can probe media info. The item stays playable — a real
+        # play request (single token, not a burst) will re-add it on demand.
+        log.debug("Catbox: skipping re-add for %s during scan-burst probe", item["title"])
+        return None
 
     if not torbox_id:
         rematerialized = True
