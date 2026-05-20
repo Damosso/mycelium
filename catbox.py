@@ -356,13 +356,19 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
             "movie" if media_type == "movie" else "series",
             imdb_id, season=season, episode=episode,
         )
+        log.info("Catbox search: Torrentio returned %d stream(s) for %s (%s)",
+                 len(streams), item.get("title"), imdb_id)
         if not streams:
             return None
         ranked = torrentio.rank_streams(streams)
         ranked = blacklist.filter_candidates(ranked)
+        log.info("Catbox search: %d candidate(s) after ranking/filter for %s",
+                 len(ranked), item.get("title"))
         if not ranked:
             return None
         cached = debrid.check_cached_multi([s.info_hash for s in ranked]).get("torbox", set())
+        log.info("Catbox search: %d/%d candidate(s) cached on TorBox for %s",
+                 len(cached), len(ranked), item.get("title"))
         for s in ranked:
             if s.info_hash in cached:
                 return s.info_hash.lower(), s.magnet
