@@ -21,19 +21,20 @@ Jellyfin shows ~200 movies but disk only has **79 movie folders / 79 .strm
 files** (verified with `find data/media/movies`). So the duplicates are NOT on
 disk — they are **ghost/duplicate entries inside Jellyfin's own database**.
 
-## ROOT CAUSE FOUND (still open)
-The app's Jellyfin API key is invalid → every Jellyfin call returns **401**:
-```
-ERROR [jellyfin] Jellyfin refresh failed: 401
-```
-Because of this the app cannot (a) trigger a library scan to prune ghosts, nor
-(b) run MergeVersions to collapse duplicates. Nothing we do reaches Jellyfin
-until this is fixed.
+## ROOT CAUSE FOUND + FIXED IN CODE
+Every Jellyfin call returned **401** (`Jellyfin refresh failed: 401`). Cause was
+a **bug**: `jellyfin.py` read the URL/key from `config.JELLYFIN_*` (env-only,
+imported once at startup), but the wizard/Settings-UI saves them to the
+**settings DB**. With nothing in `.env`, the token was empty → 401. (TorBox
+worked because it uses `settings.get(...)`.)
 
-### Next action (do this first)
-1. Jellyfin → Dashboard → API Keys → create/verify a key.
-2. App → Settings tab → paste Jellyfin API key → **Test** (must go green) → Save.
-   Confirm URL is `http://10.0.0.10:8096`.
+Fixed: `jellyfin.py` now reads `settings.get("JELLYFIN_URL")` /
+`settings.get("JELLYFIN_API_KEY")` at call time (commit on `main`).
+
+### Next action (after pulling the fix)
+1. On NAS: `git pull origin main && docker compose up -d --build`.
+2. App → Settings tab → set Jellyfin URL `http://10.0.0.10:8096` + the API key
+   created in Jellyfin (Dashboard → API Keys) → Save.
 3. Verify: `docker compose logs --tail=20 mycelium | grep -i jellyfin`
    should show `library refresh accepted`, not `401`.
 4. Then run a full Jellyfin scan + let MergeVersions run. Ghost entries share

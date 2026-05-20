@@ -2,12 +2,14 @@ import logging
 
 import requests
 
-from config import JELLYFIN_API_KEY, JELLYFIN_URL
+import settings
 
 log = logging.getLogger(__name__)
 
 
 def refresh_library(timeout: int = 30) -> bool:
+    JELLYFIN_URL = settings.get("JELLYFIN_URL")
+    JELLYFIN_API_KEY = settings.get("JELLYFIN_API_KEY")
     if not JELLYFIN_URL:
         log.warning("JELLYFIN_URL not set; skipping library refresh")
         return False
@@ -25,6 +27,7 @@ def refresh_library(timeout: int = 30) -> bool:
 
 
 def _jf_headers() -> dict:
+    JELLYFIN_API_KEY = settings.get("JELLYFIN_API_KEY")
     h = {"Content-Type": "application/json"}
     if JELLYFIN_API_KEY:
         h["X-Emby-Token"] = JELLYFIN_API_KEY
@@ -33,6 +36,7 @@ def _jf_headers() -> dict:
 
 def merge_duplicate_versions(timeout: int = 60) -> bool:
     """Find duplicate movies in Jellyfin and merge their versions."""
+    JELLYFIN_URL = settings.get("JELLYFIN_URL")
     if not JELLYFIN_URL:
         log.warning("JELLYFIN_URL not set; skipping MergeVersions")
         return False
@@ -96,6 +100,7 @@ def merge_duplicate_versions(timeout: int = 60) -> bool:
 
 def refresh_missing_images(timeout: int = 10) -> int:
     """Find movies and series in Jellyfin without a primary image and trigger a refresh."""
+    JELLYFIN_URL = settings.get("JELLYFIN_URL")
     if not JELLYFIN_URL:
         log.warning("JELLYFIN_URL not set; skipping refresh_missing_images")
         return 0
