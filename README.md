@@ -109,7 +109,7 @@ The name felt right. Mycelium.
 <summary><b>📥 Auto-add + bulk import</b></summary>
 
 - **Auto-add categories**: trending (day/week), popular, top-rated, per-service top lists (Netflix NL Top 10, Prime NL, Disney NL) — configurable count per category, min rating, min votes
-- **Radarr / Sonarr bulk import**: point at an existing Radarr/Sonarr, pull all monitored movies/series in one click
+- **Radarr / Sonarr bulk import**: point at an existing Radarr/Sonarr instance, pull all monitored movies/series in one click with live progress bar (added/skipped/errors)
 
 </details>
 
@@ -158,6 +158,8 @@ sequenceDiagram
 - **Daily DB backup**, 14 retained.
 - **Recovery wizard**: one-button repair pipeline.
 - **Library import**: rebuild DB from `.strm` files after disaster.
+- **Repair broken strm**: Admin → Maintenance → one-click repair for `.strm` files containing expired direct TorBox CDN URLs — relinks to catbox proxy or requeues for reprocessing.
+- **Failed request retry**: Requests page shows failed processing attempts with per-row manual retry button.
 - **Docker healthcheck** wired to `/health` so Synology auto-restarts on issues.
 
 </details>
@@ -259,12 +261,13 @@ flowchart LR
 
 | Component | Where it lives |
 |---|---|
-| `processor.py` | Request, search, cache check, add to TorBox |
-| `strm_generator.py` | Walks TorBox mylist, writes `.strm` files (direct or proxy URL) |
-| `catbox.py` | Lazy materialize / release lifecycle |
-| `cleanup.py` | Repair broken strms, remove duplicates, regenerate trailers |
-| `upgrader.py` | Auto-upgrade and season-pack consolidation |
+| `processor.py` | Request, search, cache check, add to TorBox or lazy-register (catbox) |
+| `strm_generator.py` | Writes `.strm` files (direct or proxy URL); `repair_expired_strms()` |
+| `catbox.py` | Lazy materialize / release lifecycle for `/stream/<token>` |
+| `cleanup.py` | Repair broken strms, rename messy folders, merge duplicates |
+| `upgrader.py` | Auto-upgrade quality + season-pack consolidation (catbox-aware) |
 | `monitor.py` | New-episode tracking for monitored series |
+| `arr_import.py` | Radarr / Sonarr bulk import with live progress |
 | `recovery.py` | One-button repair wizard |
 | `webdav.py` | Optional read-only WebDAV server for Plex/Emby |
 | `app.py` | Flask app, scheduler, UI endpoints |
@@ -408,17 +411,21 @@ Plex doesn't support `.strm` natively, but the optional WebDAV server (see above
 <details>
 <summary><b>What's the difference between fixed strm and Catbox mode?</b></summary>
 
-In **fixed strm** mode, each `.strm` contains a direct TorBox CDN URL. Simple, works even when this service is down, but URLs may rot after about 30 days as TorBox cycles its cache. The cleanup task repairs them on a 24h schedule.
+In **fixed strm** mode, each `.strm` contains a direct TorBox `requestdl` CDN URL. Simple, works even when this service is down, but URLs expire after about 24 hours. If you don't re-add the torrent frequently, links rot.
 
-In **Catbox mode**, each `.strm` contains a proxy URL pointing at this service. On playback we re-add the torrent (if released), fetch a fresh URL, and 307-redirect. No URL rot, library size effectively unlimited, but playback requires Mycelium to be up.
+In **Catbox mode** (`CATBOX_MODE=true`), each `.strm` contains a proxy URL pointing at `/stream/<token>`. On playback Mycelium fetches a fresh URL on demand, re-adding the torrent to TorBox if it was previously released. No URL rot, library size effectively unlimited, but playback requires Mycelium to be up.
 
-Most people should enable Catbox once they trust the setup.
+**Migrating from fixed to Catbox:** enable `CATBOX_MODE` + `CATBOX_LAZY_ADD`, then Admin → Maintenance → **Repair broken strm files**. The repair scans all movie `.strm` files, relinks any with expired direct URLs to a catbox proxy token (or requeues for reprocessing if no token exists yet).
+
+Most people should enable Catbox mode once they trust the setup.
 </details>
 
 <details>
 <summary><b>Does this work with Radarr / Sonarr?</b></summary>
 
-Not directly. Mycelium consumes Seerr webhooks, not the qBittorrent API. If you want Radarr / Sonarr compatibility, [elfhosted's CatBox](https://docs.elfhosted.com/app/catbox/) is the production-grade option.
+Yes, for **bulk migration**. Admin → Radarr/Sonarr import pulls your entire monitored library in one click and adds everything to Mycelium. Configure `RADARR_URL` + `RADARR_API_KEY` (and the Sonarr equivalents) in Settings, then use the import panel.
+
+For ongoing new-content requests Mycelium's built-in SPA or Seerr webhook is the primary path — it doesn't act as a download client for Radarr's automation loop.
 </details>
 
 <details>
@@ -453,6 +460,9 @@ If the DB itself is corrupted: Overview → **🚑 Recovery wizard** rebuilds th
 - [x] ~~Per-episode RealDebrid fallback~~. Movies, season packs and per-episode all go through RD when TorBox misses.
 - [x] ~~Optional auth for the dashboard~~. Password login, trusted-proxy headers, or native OIDC.
 - [x] ~~Native OIDC support~~. Works with Authelia, Authentik, Keycloak, Google, Auth0, Okta. Opt-in.
+- [x] ~~Radarr / Sonarr bulk import~~. Admin panel with live progress, reads settings from DB.
+- [x] ~~Repair broken .strm files~~. Admin → Maintenance → one-click fix for expired direct CDN URLs.
+- [x] ~~Failed request visibility + manual retry~~. Requests page shows failures with per-row retry button.
 
 ---
 
