@@ -680,6 +680,14 @@ def get_virtual_item(token: str) -> dict | None:
         return dict(row) if row else None
 
 
+def get_virtual_item_by_hash(info_hash: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM virtual_items WHERE info_hash=?", (info_hash.lower(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def get_all_virtual_items() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(

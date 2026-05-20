@@ -4,6 +4,7 @@ from pathlib import Path
 
 import requests as req_lib
 
+import db
 import jellyfin
 import settings
 import torbox as torbox_mod
@@ -146,16 +147,26 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
     return _write_strm(path, catbox.proxy_url(token))
 
 
+def _norm_title(s: str) -> str:
+    """Normalize a folder/title string for fuzzy duplicate detection.
+    Strips year in parens, leading articles, punctuation, and lowercases."""
+    s = re.sub(r'\(\d{4}\)', '', s)           # remove (year)
+    s = re.sub(r'^(the|a|an)\s+', '', s, flags=re.IGNORECASE)  # strip leading article
+    return re.sub(r'[^a-z0-9]', '', s.lower())  # alphanumeric only
+
+
 def _write_strm(path: Path, url: str) -> bool:
     """Write .strm file only if it doesn't exist. Returns True if a new file was written."""
     if path.exists():
         return False
-    # Case-insensitive check: skip if a folder for the same movie already exists
+    # Fuzzy duplicate check: skip if any existing sibling folder normalizes to the same title.
+    # Catches "The Minecraft Movie (2025)" vs "Minecraft Movie The (2025)", case differences, etc.
     parent = path.parent.parent  # movies/ or series/
-    folder_lower = path.parent.name.lower()
+    norm = _norm_title(path.parent.name)
     if parent.is_dir():
         for existing in parent.iterdir():
-            if existing.is_dir() and existing.name.lower() == folder_lower and existing != path.parent:
+            if existing.is_dir() and existing != path.parent and _norm_title(existing.name) == norm:
+                log.info("Skipping duplicate strm %s — already have %s", path.parent.name, existing.name)
                 return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +208,18 @@ def process_torrent(item: dict) -> int:
 
     if not torbox_mod._is_ready(item):
         return 0
+
+    # In Catbox mode: if this hash is already registered and the strm still exists on disk,
+    # skip entirely — avoids creating a second folder with the torrent-parsed title
+    # when the movie was originally added with the TMDB title.
+    if settings.get("CATBOX_MODE", False):
+        info_hash = (item.get('hash') or '').lower()
+        if info_hash:
+            existing = db.get_virtual_item_by_hash(info_hash)
+            if existing and existing.get('strm_path') and Path(existing['strm_path']).exists():
+                log.debug("process_torrent: %s already has strm at %s — skipping",
+                          torrent_name, existing['strm_path'])
+                return 0
 
     is_series = bool(_EP_RE.search(_clean(torrent_name)) or
                      re.search(r'\bS\d{1,2}\b', torrent_name, re.IGNORECASE))

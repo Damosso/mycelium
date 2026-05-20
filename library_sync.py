@@ -269,3 +269,50 @@ def resolve_unknowns() -> dict:
         time.sleep(0.25)
     log.info("resolve_unknowns: %d resolved, %d unresolved", resolved, failed)
     return {"resolved": resolved, "failed": failed}
+
+
+def _norm(s: str) -> str:
+    """Normalize a folder name for fuzzy dedup: strip year, leading article, keep alphanumeric."""
+    s = re.sub(r'\(\d{4}\)', '', s)
+    s = re.sub(r'^(the|a|an)\s+', '', s, flags=re.IGNORECASE)
+    return re.sub(r'[^a-z0-9]', '', s.lower())
+
+
+def dedup_movie_folders() -> dict:
+    """Find movie folders that are duplicates (same normalized title + year) and delete the
+    shorter/worse-named one, keeping the folder whose name best matches the TMDB style.
+    Returns {"checked": N, "removed": M}."""
+    import shutil
+    movies_dir = Path(MEDIA_PATH) / "movies"
+    if not movies_dir.is_dir():
+        return {"checked": 0, "removed": 0}
+
+    # Group folders by (norm_title, year)
+    groups: dict[tuple, list[Path]] = {}
+    for folder in movies_dir.iterdir():
+        if not folder.is_dir():
+            continue
+        yr_m = _FOLDER_YEAR_RE.search(folder.name)
+        year = yr_m.group(1) if yr_m else ""
+        key = (_norm(folder.name), year)
+        groups.setdefault(key, []).append(folder)
+
+    removed = 0
+    checked = len(groups)
+    for key, folders in groups.items():
+        if len(folders) < 2:
+            continue
+        # Keep the folder with the longest name (usually the TMDB one with proper title),
+        # delete the shorter/malformed ones.
+        folders.sort(key=lambda p: -len(p.name))
+        keeper = folders[0]
+        for dupe in folders[1:]:
+            log.info("dedup_movie_folders: removing duplicate %s (keeping %s)", dupe.name, keeper.name)
+            try:
+                shutil.rmtree(dupe)
+                removed += 1
+            except Exception as exc:
+                log.warning("dedup_movie_folders: could not remove %s: %s", dupe, exc)
+
+    log.info("dedup_movie_folders: checked %d title groups, removed %d duplicate folders", checked, removed)
+    return {"checked": checked, "removed": removed}
