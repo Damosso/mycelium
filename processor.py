@@ -144,17 +144,19 @@ def _add_best_from(candidates: list, label: str) -> tuple[bool, Optional[Torrent
 
 
 def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[TorrentioStream]:
-    """Catbox lazy mode: pick the best cached candidate and register a virtual
+    """Catbox lazy mode: pick the best CACHED candidate and register a virtual
     .strm WITHOUT adding to TorBox. createtorrent is deferred to first play.
-    Returns the registered stream, or None to fall back to eager add."""
+    Returns the registered stream, or None if nothing is cached yet."""
     candidates = blacklist.filter_candidates(candidates)
     if not candidates:
         return None
     import debrid
     cached_hashes = debrid.check_cached_multi([s.info_hash for s in candidates]).get("torbox", set())
     cached = [s for s in candidates if s.info_hash in cached_hashes]
-    # Prefer a cached release so first playback is instant; otherwise best overall.
-    winner = (cached or candidates)[0]
+    if not cached:
+        log.info("Lazy: no cached release for %s — will wait in wanted", req.title)
+        return None
+    winner = cached[0]
     year = strm_generator._extract_year(winner.name) or strm_generator._extract_year(winner.title)
     if not year:
         try:
@@ -167,10 +169,9 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
             year = None
     if strm_generator.create_lazy_movie_strm(winner.info_hash, winner.magnet, req.title, year,
                                               imdb_id=req.imdb_id, tmdb_id=getattr(req, 'tmdb_id', None)):
-        log.info("Lazy-registered movie %s (cached=%s) — createtorrent deferred to first play",
-                 req.title, winner.info_hash in cached_hashes)
+        log.info("Lazy-registered movie %s (cached) — createtorrent deferred to first play", req.title)
         return winner
-    log.info("Lazy registration skipped for %s (strm exists?) — falling back to eager", req.title)
+    log.info("Lazy registration skipped for %s (strm exists?)", req.title)
     return None
 
 
@@ -188,10 +189,17 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
     log.info("Trying %d candidate(s) for %s", len(candidates), req.title)
 
     # Lazy materialization: register without spending a createtorrent slot.
+    # In catbox mode we ONLY accept cached releases — uncached means we wait
+    # in wanted until TorBox has it cached, so playback is always instant.
     if _settings.get("CATBOX_MODE", False) and _settings.get("CATBOX_LAZY_ADD", False):
         winner = _lazy_register_movie(req, candidates)
         if winner:
             return True, winner
+        reason = "no cached release yet — waiting for TorBox to cache it"
+        log.info("Catbox: no cached release for %s — marking wanted", req.title)
+        _LAST_FAIL_REASON[req.imdb_id] = reason
+        _WANTED[req.imdb_id] = reason
+        return False, None
 
     try:
         ok, winner = _add_best_from(candidates, req.title)
