@@ -234,8 +234,14 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
     Returns True if a new .strm was written."""
     import catbox
 
-    # imdb_id is leading: check if a folder already exists for this movie.
+    # imdb_id is leading: check if a virtual_item already exists for this movie
+    # (regardless of whether the .strm is present on disk right now).
     if imdb_id:
+        existing_items = db.get_virtual_items_by_imdb(imdb_id, media_type="movie")
+        if existing_items:
+            log.info("create_lazy_movie_strm: virtual_item for %s already exists — skipping",
+                     imdb_id)
+            return False
         existing = _find_movie_folder_by_imdb(imdb_id)
         if existing:
             log.info("create_lazy_movie_strm: folder for %s already exists (%s) — skipping",
