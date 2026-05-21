@@ -445,9 +445,11 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
             item["file_id"] = None
 
         try:
-            torbox.add_magnet(new_magnet, reason="catbox-search")
-            # Cached torrents are ready instantly — check once before entering the poll loop.
-            live = torbox.find_by_hash(new_hash, force_refresh=True)
+            added = torbox.add_magnet(new_magnet, reason="catbox-search")
+            # Use the ID from the add response to avoid a full mylist refresh.
+            live = added if added.get("id") and torbox._is_ready(added) else None
+            if not live:
+                live = torbox.find_by_id(added["id"]) if added.get("id") else None
             if not live or not torbox._is_ready(live):
                 live = torbox.wait_until_ready(new_hash, timeout=ON_PLAY_READY_TIMEOUT_SEC)
             if not live:
@@ -606,6 +608,7 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
                     item["title"])
         return _SEARCH_UNAVAILABLE
     try:
+        import concurrent.futures
         import torrentio
         import debrid
         import blacklist
@@ -613,21 +616,30 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
         season = item.get("season")
         episode = item.get("episode")
         import zilean as _zilean
-        streams: list = []
-        if _settings.get("ZILEAN_ENABLED", False):
-            zilean_streams = _zilean.fetch_streams(imdb_id, season=season, episode=episode)
-            log.info("Catbox search: Zilean returned %d stream(s) for %s (%s)",
-                     len(zilean_streams), item.get("title"), imdb_id)
-            streams = zilean_streams
-        torrentio_streams = torrentio.fetch_streams(
-            "movie" if media_type == "movie" else "series",
-            imdb_id, season=season, episode=episode,
-        )
-        log.info("Catbox search: Torrentio returned %d stream(s) for %s (%s)",
-                 len(torrentio_streams), item.get("title"), imdb_id)
-        # Merge: add Torrentio entries not already in Zilean (dedup by info_hash)
-        seen_hashes = {s.info_hash for s in streams}
-        streams += [s for s in torrentio_streams if s.info_hash not in seen_hashes]
+
+        # Run Zilean and Torrentio in parallel to halve search latency.
+        def _fetch_zilean():
+            if not _settings.get("ZILEAN_ENABLED", False):
+                return []
+            return _zilean.fetch_streams(imdb_id, season=season, episode=episode)
+
+        def _fetch_torrentio():
+            return torrentio.fetch_streams(
+                "movie" if media_type == "movie" else "series",
+                imdb_id, season=season, episode=episode,
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f_zilean = ex.submit(_fetch_zilean)
+            f_torrentio = ex.submit(_fetch_torrentio)
+            zilean_streams = f_zilean.result()
+            torrentio_streams = f_torrentio.result()
+
+        log.info("Catbox search: Zilean=%d Torrentio=%d stream(s) for %s (%s)",
+                 len(zilean_streams), len(torrentio_streams), item.get("title"), imdb_id)
+        # Merge: Zilean first, add Torrentio entries not already in Zilean (dedup by info_hash)
+        seen_hashes = {s.info_hash for s in zilean_streams}
+        streams = zilean_streams + [s for s in torrentio_streams if s.info_hash not in seen_hashes]
         log.info("Catbox search: %d stream(s) total after merge for %s",
                  len(streams), item.get("title"))
         if not streams:
