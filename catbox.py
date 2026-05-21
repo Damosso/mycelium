@@ -446,7 +446,10 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
 
         try:
             torbox.add_magnet(new_magnet, reason="catbox-search")
-            live = torbox.wait_until_ready(new_hash, timeout=ON_PLAY_READY_TIMEOUT_SEC)
+            # Cached torrents are ready instantly — check once before entering the poll loop.
+            live = torbox.find_by_hash(new_hash, force_refresh=True)
+            if not live or not torbox._is_ready(live):
+                live = torbox.wait_until_ready(new_hash, timeout=ON_PLAY_READY_TIMEOUT_SEC)
             if not live:
                 log.error("Catbox: fresh release not ready for %s — keeping .strm, retry soon",
                           item["title"])
