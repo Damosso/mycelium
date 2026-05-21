@@ -67,6 +67,13 @@ def _fail_put(token: str, ttl: int = _FAIL_COOLDOWN_SEC) -> None:
         _fail_cache[token] = time.monotonic() + ttl
 
 _token_locks: dict[str, threading.Lock] = {}
+
+# Per-content search cache so Zilean/Torrentio are called at most once per hour
+# for the same (imdb_id, season, episode) combo, regardless of how many tokens share it.
+_search_cache: dict[tuple, tuple[float, object]] = {}  # key → (expiry, result)
+_search_cache_lock = threading.Lock()
+_SEARCH_HIT_TTL    = 300    # 5 min: re-check soon if a cached release was found
+_SEARCH_MISS_TTL   = 21600  # 6 h:  nothing cached — back off (matches _fail_put below)
 _token_locks_lock = threading.Lock()
 
 # ── scan/probe burst detection ────────────────────────────────────────────────
@@ -254,7 +261,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
 
         rematerialized = True
         log.info("Catbox/RD: searching cached release for %s", item["title"])
-        fresh = _search_best_cached_release(item)
+        fresh = _search_cached_release(item)
         if fresh is _SEARCH_UNAVAILABLE:
             _fail_put(token, _FAIL_COOLDOWN_SEC)
             if ckey:
@@ -385,7 +392,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
     if not torbox_id:
         rematerialized = True
         log.info("Catbox: searching fresh cached release for %s", item["title"])
-        fresh = _search_best_cached_release(item)
+        fresh = _search_cached_release(item)
         if fresh is _SEARCH_UNAVAILABLE:
             _fail_put(token, _FAIL_COOLDOWN_SEC)
             if ckey:
@@ -525,6 +532,33 @@ def _remove_strm(item: dict) -> None:
 
 
 _SEARCH_UNAVAILABLE = object()  # sentinel: search couldn't run (no imdb_id, network error)
+
+
+def _search_cached_release(item: dict) -> object:
+    """Thin cache layer around _search_best_cached_release.
+
+    Deduplicates Zilean/Torrentio calls when multiple tokens share the same
+    (imdb_id, season, episode).  A miss is cached for 6 h, a hit for 5 min
+    (so a newly-cached release is picked up quickly on retry).
+    """
+    imdb_id = item.get("imdb_id")
+    if not imdb_id:
+        # No imdb_id → _search_best_cached_release will handle + log the warning.
+        return _search_best_cached_release(item)
+    key = (imdb_id, item.get("season"), item.get("episode"))
+    now = time.monotonic()
+    with _search_cache_lock:
+        entry = _search_cache.get(key)
+        if entry and entry[0] > now:
+            result = entry[1]
+            log.debug("Catbox search cache hit for %s %s — skipping Zilean/Torrentio",
+                      imdb_id, key[1:])
+            return result
+    result = _search_best_cached_release(item)
+    ttl = _SEARCH_HIT_TTL if result and result is not _SEARCH_UNAVAILABLE else _SEARCH_MISS_TTL
+    with _search_cache_lock:
+        _search_cache[key] = (now + ttl, result)
+    return result
 
 
 def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
