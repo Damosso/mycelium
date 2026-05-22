@@ -35,7 +35,7 @@ _QUALITY_PATTERNS = {
     "480p": re.compile(r"\b480p\b", re.IGNORECASE),
 }
 
-_REMUX_RE = re.compile(r"\b(remux|bluray|blu-ray|bdremux)\b", re.IGNORECASE)
+_REMUX_RE = re.compile(r"\b(remux|bdremux)\b", re.IGNORECASE)
 _CAM_RE = re.compile(r"\b(cam|camrip|hdcam|ts|telesync|hdts|scr|screener|dvdscr|workprint|r5)\b", re.IGNORECASE)
 _WEBDL_RE = re.compile(r"\b(web-?dl|webrip|web)\b", re.IGNORECASE)
 _HEVC_RE  = re.compile(r"\b(hevc|x265|h\.?265)\b", re.IGNORECASE)
