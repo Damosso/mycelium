@@ -167,11 +167,10 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
                 year = int((results[0].get("release_date") or "0000")[:4]) or None
         except Exception:
             year = None
-    source = (winner.name.split()[0] if winner.name else None)
     if strm_generator.create_lazy_movie_strm(
         winner.info_hash, winner.magnet, req.title, year,
         imdb_id=req.imdb_id, tmdb_id=getattr(req, 'tmdb_id', None),
-        quality=winner.quality, source=source, size_gb=winner.size_gb,
+        quality=winner.quality, source=winner.source, size_gb=winner.size_gb,
     ):
         log.info("Lazy-registered movie %s (cached, %s) — createtorrent deferred to first play",
                  req.title, winner.quality)
@@ -328,13 +327,12 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
         log.info("Lazy: cached season pack for %s S%02d (%d ep), registering %d episode(s)",
                  req.title, season, ep_count, ep_count)
         written = 0
-        source = pack.name.split()[0] if pack.name else None
         for ep in range(1, ep_count + 1):
             if strm_generator.create_lazy_episode_strm(
                 pack.info_hash, pack.magnet, req.title, season, ep,
                 imdb_id=req.imdb_id,
                 quality=pack.quality,
-                source=source,
+                source=pack.source,
                 size_gb=pack.size_gb,
             ):
                 written += 1
@@ -367,12 +365,11 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
             break
 
         winner = ep_candidates[0]
-        source = winner.name.split()[0] if winner.name else None
         if strm_generator.create_lazy_episode_strm(
             winner.info_hash, winner.magnet, req.title, season, episode,
             imdb_id=req.imdb_id,
             quality=winner.quality,
-            source=source,
+            source=winner.source,
             size_gb=winner.size_gb,
         ):
             added += 1
@@ -532,7 +529,7 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         db.update_request(
             row_id, "success",
             quality=winner.quality if winner else None,
-            source=winner.name.split()[0] if winner else None,
+            source=winner.source if winner else None,
             info_hash=winner.info_hash if winner else None,
         )
         if not req.is_movie:
@@ -571,12 +568,11 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
             log.debug("metrics_prom (success) failed: %s", exc)
         if winner:
             db.record_metric("quality_added", winner.quality, value_int=1)
-            source = (winner.name.split()[0] if winner.name else "?").lower()
-            db.record_metric("source_win", source, value_int=1)
+            db.record_metric("source_win", winner.source, value_int=1)
             try:
                 import metrics_prom
                 metrics_prom.quality_added_total.labels(quality=winner.quality or "unknown").inc()
-                metrics_prom.source_wins_total.labels(source=source).inc()
+                metrics_prom.source_wins_total.labels(source=winner.source).inc()
             except Exception as exc:
                 log.debug("metrics_prom (quality) failed: %s", exc)
     elif req.imdb_id in _WANTED:

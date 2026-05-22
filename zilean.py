@@ -49,9 +49,10 @@ def _to_stream(raw: dict, season: int | None) -> TorrentioStream | None:
         title=raw_title,
         info_hash=info_hash.lower(),
         quality=quality,
-        seeders=0,  # Zilean doesn't expose seeder counts
+        seeders=0,
         size_gb=size_gb,
         is_season_pack=_looks_like_season_pack(raw_title, season),
+        source="zilean",
     )
 
 

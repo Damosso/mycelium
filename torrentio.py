@@ -66,6 +66,7 @@ class TorrentioStream:
     size_gb: float
     is_season_pack: bool
     languages: tuple[str, ...] = ()
+    source: str = "torrentio"
 
     @property
     def magnet(self) -> str:
