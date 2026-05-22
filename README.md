@@ -210,6 +210,13 @@ sequenceDiagram
 
 ---
 
+## 📖 Community guides
+
+- **[Proxmox / NAS install guide](docs/install-guide.html)** -- step-by-step walkthrough for both Proxmox LXC and Synology NAS setups, available in English and Dutch. Also available as a [zip bundle](docs/mycelium-install-guide.zip) with `docker-compose.yml` and `.env`.
+  Written by [Ventrex](https://github.com/Ventrex07).
+
+---
+
 ## 🚀 Quick start
 
 ### Prerequisites
@@ -222,6 +229,7 @@ That's it. Out of the box Mycelium uses [Torrentio](https://torrentio.strem.fun)
 **Optional add-ons** (you don't need any of these to get started):
 - [Zilean](https://github.com/iPromKnight/zilean): self-hosted local hash index, tried before Torrentio for faster and private search.
 - [RealDebrid](https://real-debrid.com): alternative debrid as fallback when TorBox doesn't have a release cached.
+- [Jellyseerr](https://jellyseerr.dev) / [Overseerr](https://overseerr.dev): request management via webhook. Mycelium has its own built-in request UI, so this is only needed if you already use Seerr.
 - [OpenSubtitles](https://www.opensubtitles.com/en/consumers) API key: auto subtitle download.
 
 ### Install
@@ -486,13 +494,6 @@ See [open issues](https://github.com/corveck79/mycelium/issues) for current work
 multi-debrid fallback (RealDebrid), Plex via WebDAV, Prometheus metrics, setup wizard,
 dark/light theme, OIDC/SSO, Radarr/Sonarr bulk import, strm repair, failed request retry,
 library status in Discover, request management with delete, episode reconciliation.
-
----
-
-## 📖 Community guides
-
-- **[Proxmox / NAS install guide](docs/install-guide.html)** -- step-by-step walkthrough for both Proxmox LXC and Synology NAS setups, available in English and Dutch. Also available as a [zip bundle](docs/mycelium-install-guide.zip) with `docker-compose.yml` and `.env`.
-  Written by [Ventrex](https://github.com/Ventrex07).
 
 ## 🤝 Contributing
 

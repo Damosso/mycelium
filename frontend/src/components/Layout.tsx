@@ -16,6 +16,10 @@ const adminItems = [
   { to: '/admin', label: 'Admin', icon: '⚙️' },
 ];
 
+const helpItems = [
+  { to: '/docs/install-guide.html', label: 'Manual', icon: '📖', external: true },
+];
+
 export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
@@ -62,6 +66,7 @@ export default function Layout() {
           {showAdmin && (
             <SidebarSection title="Manage" items={adminItems} onClick={() => setDrawerOpen(false)} />
           )}
+          <SidebarSection title="Help" items={helpItems} onClick={() => setDrawerOpen(false)} />
         </nav>
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border text-xs text-muted">
           {session?.user ? (
