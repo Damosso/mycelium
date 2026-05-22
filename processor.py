@@ -176,8 +176,9 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
         log.info("Lazy-registered movie %s (cached, %s) — createtorrent deferred to first play",
                  req.title, winner.quality)
         return winner
-    log.info("Lazy registration skipped for %s (strm exists?)", req.title)
-    return None
+    # strm already exists — still a success, don't mark as wanted
+    log.info("Lazy registration skipped for %s (strm already exists) — treating as success", req.title)
+    return winner
 
 
 def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
