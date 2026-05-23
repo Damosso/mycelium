@@ -378,6 +378,18 @@ def _migrate() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN region TEXT NOT NULL DEFAULT 'NL'")
             log.info("Migration: added users.region")
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS playback_sessions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                token      TEXT    NOT NULL,
+                position_s REAL    NOT NULL DEFAULT 0,
+                duration_s REAL,
+                updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')),
+                UNIQUE(user_id, token)
+            )
+        """)
+
         conn.commit()
 
 
@@ -1261,6 +1273,20 @@ def touch_user_login(user_id: int) -> None:
     with _connect() as conn:
         conn.execute("UPDATE users SET last_login=strftime('%Y-%m-%d %H:%M:%S','now') WHERE id=?",
                      (user_id,))
+
+
+def save_playback_position(user_id: int, token: str,
+                           position_s: float,
+                           duration_s: float | None = None) -> None:
+    with _connect() as conn:
+        conn.execute("""
+            INSERT INTO playback_sessions (user_id, token, position_s, duration_s)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, token) DO UPDATE
+              SET position_s = excluded.position_s,
+                  duration_s = COALESCE(excluded.duration_s, duration_s),
+                  updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+        """, (user_id, token, position_s, duration_s))
 
 
 def delete_user(user_id: int) -> None:

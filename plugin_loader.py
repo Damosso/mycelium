@@ -79,3 +79,14 @@ def user_fields() -> list[str]:
     for p in _loaded.values():
         fields.extend(p["meta"].get("user_fields", []))
     return fields
+
+
+def register_jobs(scheduler) -> None:
+    """Call after the APScheduler is started."""
+    for name, p in _loaded.items():
+        if hasattr(p["module"], "register_jobs"):
+            try:
+                p["module"].register_jobs(scheduler)
+                log.info("Plugin jobs registered: %s", name)
+            except Exception:
+                log.exception("Plugin job registration failed: %s", name)

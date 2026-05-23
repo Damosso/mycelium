@@ -349,6 +349,7 @@ def _start_scheduler() -> BackgroundScheduler:
 
 
 scheduler = _start_scheduler()
+plugin_loader.register_jobs(scheduler)
 
 if CATCHUP_ENABLED:
     catchup.schedule()
