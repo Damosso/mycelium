@@ -4,6 +4,9 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import SubtitlePicker from './SubtitlePicker'
 import { api } from '../../api'
 
+const csrfToken = () =>
+  document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || ''
+
 const STEP_LABELS: Record<string, string> = {
   searching:     'Looking for a web-compatible version…',
   materializing: 'Fetching via TorBox…',
@@ -56,7 +59,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     mutationFn: () =>
       fetch('/ui/api/web-player/prepare', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
         body: JSON.stringify({ imdb_id, media_type, season, episode }),
       }).then(r => r.json()) as Promise<{ job_id: string }>,
     onSuccess: r => setJobId(r.job_id),
@@ -99,7 +102,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       if (token && !video.paused) {
         fetch(`/stream/${token}/position`, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
           body:    JSON.stringify({ position_s: video.currentTime, duration_s: video.duration }),
         })
       }
