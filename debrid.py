@@ -19,11 +19,13 @@ log = logging.getLogger(__name__)
 
 
 def check_cached_multi(hashes: list[str]) -> dict[str, set[str]]:
-    """Return {provider: set_of_cached_hashes}. Empty providers omitted."""
+    """Return {provider: set_of_cached_hashes}. Empty providers omitted.
+    Raises torbox.RateLimited if TorBox returns 429/403 so callers can apply
+    a proper backoff instead of treating an empty result as "nothing cached"."""
     out: dict[str, set[str]] = {}
     if not hashes:
         return out
-    out["torbox"] = torbox.check_cached(hashes)
+    out["torbox"] = torbox.check_cached(hashes)  # may raise RateLimited
     try:
         import realdebrid
         if realdebrid.is_configured():

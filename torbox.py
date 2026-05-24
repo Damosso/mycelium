@@ -296,8 +296,12 @@ def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
         resp.raise_for_status()
     except requests.RequestException as exc:
         log.warning("TorBox checkcached failed: %s", exc)
-        if "429" in str(exc):
-            raise RateLimited("checkcached 429")
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (429, 403) or "429" in str(exc) or "403" in str(exc):
+            # 429 = rate limited; 403 = API key invalid / plan restriction.
+            # Either way the empty result is not trustworthy — raise so callers
+            # can apply a short backoff instead of a false "not cached" conclusion.
+            raise RateLimited(f"checkcached {status or 'error'}")
         return set()
     data = (resp.json() or {}).get("data") or {}
     cached = {h.lower() for h in data.keys()}
