@@ -54,11 +54,6 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
 
   const [jobId,       setJobId]       = useState<string | null>(null)
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
-
-  // Session key = info_hash, derived from the stream URL path.
-  const sessionKey = status?.stream_url
-    ? status.stream_url.split('/')[2] ?? null
-    : null
   const [jumpMin,     setJumpMin]     = useState('')
   const [jumping,     setJumping]     = useState(false)
 
@@ -187,6 +182,9 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     videoRef.current.appendChild(track)
   }, [subtitleUrl])
 
+  // Derived after status is declared — info_hash is segment [2] of /stream/<hash>/hls/...
+  const sessionKey = status?.stream_url?.split('/')[2] ?? null
+
   const stepIndex = STEPS.indexOf((status?.status ?? 'searching') as any)
   const fileInfo  = status?.file_info
 
@@ -195,7 +193,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative w-full max-w-5xl">
+      <div className="relative w-full max-w-5xl" onClick={e => e.stopPropagation()}>
         <button
           onClick={onClose}
           className="absolute -top-8 right-0 text-white/60 hover:text-white text-sm"
@@ -254,9 +252,6 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
                   <span className="text-white font-medium">{fileInfo.height}p</span>
                 )}
                 <span>{fileInfo.video_codec?.toUpperCase()}</span>
-                {fileInfo.is_hdr && (
-                  <span className="text-yellow-400 text-xs font-medium">HDR→SDR</span>
-                )}
 
                 {fileInfo.audio_tracks?.length > 1 && (
                   <select

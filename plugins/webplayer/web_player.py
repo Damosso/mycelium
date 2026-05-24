@@ -247,38 +247,61 @@ def _run_job(job: PrepareJob) -> None:
             job.error  = "No instantly available version found. Use Jellyfin."
             return
 
-        log.info("web_player: selected %r hash=%s", best.title, best.info_hash)
+        # Probe each candidate; skip any that turn out to be HDR after all
+        # (name-based filter may miss unlabelled HDR releases).
+        cdn_url   = None
+        file_info = None
+        session_key = None
+        for candidate in ([best] + [c for c in candidates if c is not best]):
+            # Only use instantly-available content.
+            _hash = candidate.info_hash
+            if not torbox.find_by_hash(_hash):
+                hashes = [_hash]
+                if _hash not in torbox.check_cached(hashes):
+                    continue
 
-        # Check for a live session keyed by info_hash (avoids re-probing).
-        session_key = best.info_hash
-        with _sessions_lock:
-            existing_session = _sessions.get(session_key)
-        if existing_session and existing_session.proc.poll() is None:
-            log.info("web_player: reusing active session hash=%s", session_key)
-            multi_audio    = len(existing_session.file_info.get("audio_tracks", [])) > 1
-            job.file_info  = existing_session.file_info
-            job.cdn_url    = existing_session.cdn_url
-            job.status     = JobStatus.READY
-            job.message    = "Ready"
-            job.stream_url = (f"/stream/{session_key}/hls/master.m3u8" if multi_audio
-                              else f"/stream/{session_key}/hls/playlist.m3u8")
-            return
+            log.info("web_player: selected %r hash=%s", candidate.title, _hash)
 
-        job.status  = JobStatus.MATERIALIZING
-        job.message = "Fetching via TorBox…"
+            # Reuse an active session without re-probing.
+            with _sessions_lock:
+                existing = _sessions.get(_hash)
+            if existing and existing.proc.poll() is None:
+                log.info("web_player: reusing active session hash=%s", _hash)
+                multi_audio   = len(existing.file_info.get("audio_tracks", [])) > 1
+                job.file_info = existing.file_info
+                job.cdn_url   = existing.cdn_url
+                job.status    = JobStatus.READY
+                job.message   = "Ready"
+                job.stream_url = (f"/stream/{_hash}/hls/master.m3u8" if multi_audio
+                                  else f"/stream/{_hash}/hls/playlist.m3u8")
+                return
 
-        cdn_url = _get_cdn_url(best)
-        if not cdn_url:
+            job.status  = JobStatus.MATERIALIZING
+            job.message = "Fetching via TorBox…"
+            _cdn = _get_cdn_url(candidate)
+            if not _cdn:
+                log.warning("web_player: requestdl failed for hash=%s, skipping", _hash)
+                continue
+
+            job.status  = JobStatus.PROBING
+            job.message = "Reading file info…"
+            _info = _probe(_cdn)
+
+            if _info.get("is_hdr"):
+                log.warning("web_player: probe detected HDR for hash=%s, skipping", _hash)
+                continue
+
+            cdn_url     = _cdn
+            file_info   = _info
+            session_key = _hash
+            break
+
+        if not cdn_url or not file_info or not session_key:
             job.status = JobStatus.ERROR
-            job.error  = "TorBox could not fetch the file."
+            job.error  = "No SDR version available for web playback. Use Jellyfin."
             return
 
-        job.cdn_url = cdn_url
-
-        job.status  = JobStatus.PROBING
-        job.message = "Reading file info…"
-
-        file_info     = _probe(cdn_url)
+        job.cdn_url   = cdn_url
         job.file_info = file_info
 
         job.status  = JobStatus.PREPARING
