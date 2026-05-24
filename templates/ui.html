@@ -1830,7 +1830,7 @@
             </td>
           </tr>`).join('');
       usersTbody.innerHTML = (users.users || []).map(u => {
-        const pluginCells = allPlugins.flatMap(p => (p.user_fields || []).map(field => {
+        const pluginCells = allPlugins.flatMap(p => ([...(p.user_fields || []), ...(p.admin_fields || [])]).map(field => {
           const label = (p.user_field_labels || {})[field] || field;
           const active = !!u[field];
           return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}"

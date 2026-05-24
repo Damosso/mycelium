@@ -8,7 +8,8 @@ PLUGIN_META = {
     "label":             "Web Player",
     "version":           "1.0.0",
     "description":       "Browser-native video playback with catbox support",
-    "user_fields":       ["webplayer_enabled"],
+    "user_fields":       [],
+    "admin_fields":      ["webplayer_enabled"],
     "user_field_labels": {"webplayer_enabled": "Web Player"},
 }
 
