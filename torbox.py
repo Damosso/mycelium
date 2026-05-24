@@ -146,6 +146,10 @@ def list_torrents(timeout: int = 30, force_refresh: bool = False) -> list[dict]:
                             params={"limit": limit, "offset": offset})
         if resp.status_code == 403:
             log.warning("TorBox mylist returned 403 - API key invalid or plan restriction")
+            # Cache the empty result for 5 minutes to avoid hammering TorBox
+            with _mylist_lock:
+                _mylist_cache["items"] = all_items
+                _mylist_cache["ts"] = _t.monotonic() + (5 * 60 - _MYLIST_TTL_SECONDS)
             return all_items
         resp.raise_for_status()
         payload = resp.json() or {}
