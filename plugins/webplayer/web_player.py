@@ -282,10 +282,19 @@ def get_session(token: str) -> HLSSession | None:
 
 
 def _aac_args(track_index: int) -> list[str]:
-    return [f"-c:a:{track_index}", "aac",
-            f"-ar:{track_index}", _AAC_SAMPLE_RATE,
-            f"-ac:{track_index}", "2",
-            f"-b:a:{track_index}", "192k"]
+    """Encode audio track track_index as AAC-LC stereo.
+
+    Uses `a:N` stream specifiers so the options correctly target audio even
+    when video is mapped as output stream 0 before audio.
+    """
+    i = track_index
+    return [
+        f"-c:a:{i}",        "aac",
+        f"-profile:a:{i}",  "aac_low",   # force AAC-LC; Chrome rejects HE/HEv2 in mpegts
+        f"-ar:a:{i}",       _AAC_SAMPLE_RATE,
+        f"-ac:a:{i}",       "2",          # downmix to stereo; Chrome won't play 5.1 AAC in mpegts
+        f"-b:a:{i}",        "192k",
+    ]
 
 
 def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSSession:
@@ -307,12 +316,22 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSS
             str(tmp_dir / "video.m3u8"),
         ]
 
-        # Output 1…N: one audio stream per track
+        # Output 1…N: one audio stream per track (single stream in each output,
+        # so index 0 always refers to that audio stream).
         for i, track in enumerate(audio_tracks):
             codec_ok = track["codec"] in _BROWSER_AUDIO_OK and track.get("channels", 2) <= 2
-            a_codec = ["copy"] if codec_ok else _aac_args(0)[2:]  # 0-indexed inside this output
+            if codec_ok:
+                a_enc = ["-c:a:0", "copy"]
+            else:
+                a_enc = [
+                    "-c:a:0", "aac",
+                    "-profile:a:0", "aac_low",
+                    "-ar:a:0", _AAC_SAMPLE_RATE,
+                    "-ac:a:0", "2",
+                    "-b:a:0", "192k",
+                ]
             cmd += [
-                "-map", f"0:a:{i}", "-c:a:0", *a_codec,
+                "-map", f"0:a:{i}", *a_enc,
                 "-hls_time", "6", "-hls_list_size", "0",
                 "-hls_flags", "independent_segments",
                 "-hls_segment_type", "mpegts",
@@ -343,7 +362,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSS
                 f'URI="audio_{i}.m3u8"'
             )
             default = "NO"
-        lines.append('#EXT-X-STREAM-INF:BANDWIDTH=4000000,CODECS="avc1.64001f,mp4a.40.2",AUDIO="audio"')
+        lines.append('#EXT-X-STREAM-INF:BANDWIDTH=4000000,AUDIO="audio"')
         lines.append("video.m3u8")
         (tmp_dir / "master.m3u8").write_text("\n".join(lines) + "\n")
 
