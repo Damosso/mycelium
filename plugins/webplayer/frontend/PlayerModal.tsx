@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import Hls from 'hls.js'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import SubtitlePicker from './SubtitlePicker'
@@ -54,6 +54,8 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
   const [jobId,       setJobId]       = useState<string | null>(null)
   const [token,       setToken]       = useState<string | null>(null)
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
+  const [jumpMin,     setJumpMin]     = useState('')
+  const [jumping,     setJumping]     = useState(false)
 
   const prepareMutation = useMutation({
     mutationFn: () =>
@@ -130,6 +132,43 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       clearInterval(saveTimer.current)
     }
   }, [status?.status])
+
+  // Reload Hls.js (or native video) with a new source URL — used after seek restart.
+  const reloadHls = useCallback((url: string) => {
+    const video = videoRef.current
+    if (!video) return
+    if (hlsRef.current) {
+      hlsRef.current.loadSource(url)
+      hlsRef.current.startLoad()
+    } else {
+      video.src = url
+      video.load()
+      video.play().catch(() => {})
+    }
+  }, [])
+
+  const handleJump = async () => {
+    if (!token) return
+    const mins = parseFloat(jumpMin)
+    if (isNaN(mins) || mins < 0) return
+    const position_s = mins * 60
+    setJumping(true)
+    try {
+      const r = await fetch(`/stream/${token}/seek`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+        body:    JSON.stringify({ position_s }),
+      })
+      if (r.ok) {
+        const { stream_url } = await r.json()
+        reloadHls(stream_url)
+        if (videoRef.current) videoRef.current.currentTime = position_s
+      }
+    } finally {
+      setJumping(false)
+      setJumpMin('')
+    }
+  }
 
   useEffect(() => {
     if (!videoRef.current || !subtitleUrl) return
@@ -229,8 +268,33 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
                 {token && <SubtitlePicker token={token} onSelect={setSubtitleUrl} />}
 
                 {fileInfo.duration_s > 0 && (
-                  <span className="ml-auto text-zinc-600">
-                    {Math.floor(fileInfo.duration_s / 60)} min
+                  <span className="text-zinc-500">
+                    {Math.floor(fileInfo.duration_s / 60)} min total
+                  </span>
+                )}
+
+                {/* Jump-to: lets the user seek to any position even before
+                    FFmpeg has generated segments that far. */}
+                {token && (
+                  <span className="ml-auto flex items-center gap-1">
+                    <span className="text-zinc-600">Jump to:</span>
+                    <input
+                      type="number" min="0"
+                      max={fileInfo.duration_s > 0 ? Math.floor(fileInfo.duration_s / 60) : undefined}
+                      placeholder="min"
+                      value={jumpMin}
+                      onChange={e => setJumpMin(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleJump()}
+                      className="w-14 bg-zinc-800 text-zinc-300 rounded px-2 py-0.5 text-xs"
+                    />
+                    <button
+                      onClick={handleJump}
+                      disabled={jumping || !jumpMin}
+                      title="Jump to this minute (restarts from nearest keyframe)"
+                      className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 rounded text-xs disabled:opacity-40"
+                    >
+                      {jumping ? '…' : '⏭'}
+                    </button>
                   </span>
                 )}
               </div>

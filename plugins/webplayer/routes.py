@@ -79,6 +79,17 @@ def stream_subtitle_file(token: str, filename: str):
     return send_file(p, mimetype="text/vtt")
 
 
+@bp.post("/stream/<token>/seek")
+def stream_seek(token: str):
+    """Restart FFmpeg at a new position so the user can jump anywhere."""
+    d = request.json or {}
+    position_s = float(d.get("position_s", 0))
+    stream_url = web_player.seek_session(token, position_s)
+    if stream_url is None:
+        abort(404)
+    return jsonify(stream_url=stream_url)
+
+
 @bp.post("/stream/<token>/position")
 def stream_save_position(token: str):
     d = request.json or {}

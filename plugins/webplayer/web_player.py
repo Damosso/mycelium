@@ -38,12 +38,24 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     if torrentio._HEVC_RE.search(blob):  return -1
     if stream.quality == "2160p":         return -1
     if torrentio._DV_RE.search(blob):    return -1
+
+    # Hard size cap: streaming huge files causes long waits before seeking works.
+    max_gb = _settings.get("WEB_PLAYER_MAX_SIZE_GB", 15) or 15
+    if 0 < stream.size_gb > max_gb:
+        return -1
+
     score = 0
     if stream.quality == "1080p":                   score += 100
     elif stream.quality == "720p":                  score += 50
     if torrentio._WEBDL_RE.search(blob):            score += 40
     if stream.seeders > 10:                         score += 10
-    if 0 < stream.size_gb < 8:                      score += 5
+
+    # Strong size preference: smaller file = faster segmentation = better UX.
+    # Typical 1080p WEB-DL is 4-8 GB; remux/high-bitrate can reach 20+ GB.
+    if   0 < stream.size_gb <  4:  score += 40
+    elif stream.size_gb     <  8:  score += 25
+    elif stream.size_gb     < 12:  score += 10
+
     return score
 
 
@@ -258,6 +270,8 @@ class HLSSession:
     token:        str
     proc:         subprocess.Popen
     tmp_dir:      Path
+    cdn_url:      str  = ""
+    file_info:    dict = field(default_factory=dict)
     started_at:   float = field(default_factory=time.monotonic)
     last_request: float = field(default_factory=time.monotonic)
     _hb:          threading.Thread = field(default=None, repr=False)
@@ -283,6 +297,46 @@ def get_session(token: str) -> HLSSession | None:
         return _sessions.get(token)
 
 
+def seek_session(token: str, position_s: float) -> str | None:
+    """Kill the running FFmpeg, wipe segments, restart at position_s.
+    Returns the (unchanged) stream URL so the frontend can reload Hls.js."""
+    with _sessions_lock:
+        session = _sessions.get(token)
+    if not session:
+        return None
+
+    multi_audio = len(session.file_info.get("audio_tracks", [])) > 1
+
+    # Stop current process
+    session.proc.terminate()
+    try:
+        session.proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        session.proc.kill()
+        session.proc.wait(timeout=1)
+
+    tmp_dir = session.tmp_dir
+
+    # Remove old segments and playlists (keep subtitles and master.m3u8 stub
+    # so the browser doesn't get 404 while we prepare the new segments).
+    for f in list(tmp_dir.glob("seg*.ts")) + list(tmp_dir.glob("seg_*_*.ts")):
+        f.unlink(missing_ok=True)
+    for name in (["playlist.m3u8", "video.m3u8", "master.m3u8"]
+                 + [f"audio_{i}.m3u8" for i in range(10)]):
+        (tmp_dir / name).unlink(missing_ok=True)
+
+    # Restart at new position (registers updated session under same token)
+    _start_hls(token, session.cdn_url, session.file_info, tmp_dir,
+               seek_offset=position_s)
+
+    # Wait for first segments (multi-audio already waits inside _start_hls)
+    if not multi_audio:
+        _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT)
+
+    return (f"/stream/{token}/hls/master.m3u8" if multi_audio
+            else f"/stream/{token}/hls/playlist.m3u8")
+
+
 def _aac_args(track_index: int) -> list[str]:
     """Encode audio track track_index as AAC-LC stereo.
 
@@ -299,14 +353,20 @@ def _aac_args(track_index: int) -> list[str]:
     ]
 
 
-def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSSession:
+def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
+               seek_offset: float = 0.0) -> HLSSession:
+    """Start (or restart) HLS segmentation.  seek_offset > 0 does a fast
+    keyframe seek in the input before beginning to generate segments."""
     audio_tracks = file_info["audio_tracks"]
     multi_audio  = len(audio_tracks) > 1
+
+    # -ss BEFORE -i = fast input seeking (jumps to nearest keyframe).
+    input_args = (["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []) + ["-i", cdn_url]
 
     if multi_audio:
         # Multi-audio: video-only stream + separate audio stream per track,
         # stitched together via a master.m3u8 so Hls.js can switch languages.
-        cmd = ["ffmpeg", "-y", "-i", cdn_url]
+        cmd = ["ffmpeg", "-y"] + input_args
 
         # Output 0: video-only
         cmd += [
@@ -341,10 +401,11 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSS
                 str(tmp_dir / f"audio_{i}.m3u8"),
             ]
 
-        log.info("web_player: starting FFmpeg (multi-audio) for token=%s", token)
+        log.info("web_player: starting FFmpeg (multi-audio) for token=%s seek=%.1f", token, seek_offset)
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-        session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir)
+        session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
+                             cdn_url=cdn_url, file_info=file_info)
         session.start_heartbeat()
         with _sessions_lock:
             _sessions[token] = session
@@ -377,7 +438,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSS
             a_codec_args = _aac_args(0)
 
         cmd = [
-            "ffmpeg", "-y", "-i", cdn_url,
+            "ffmpeg", "-y", *input_args,
             "-map", "0:v:0",
             *((["-map", "0:a:0"] + a_codec_args) if track else ["-an"]),
             "-c:v", "copy",
@@ -387,10 +448,11 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path) -> HLSS
             "-hls_segment_filename", str(tmp_dir / "seg%05d.ts"),
             str(tmp_dir / "playlist.m3u8"),
         ]
-        log.info("web_player: starting FFmpeg (single-audio) for token=%s", token)
+        log.info("web_player: starting FFmpeg (single-audio) for token=%s seek=%.1f", token, seek_offset)
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-        session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir)
+        session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
+                             cdn_url=cdn_url, file_info=file_info)
         session.start_heartbeat()
         with _sessions_lock:
             _sessions[token] = session
