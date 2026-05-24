@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, tmdbImg } from '../api';
 import type { MediaType, TmdbItem, WatchlistItem } from '../types';
@@ -157,10 +158,10 @@ export default function DetailModal({
   const backdrop = tmdbImg.backdrop(detail?.backdrop_path);
   const trailer = detail?.trailers?.[0];
 
-  return (
+  return createPortal(
     <>
     <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto p-4 sm:p-8"
+      className="fixed inset-0 z-[200] bg-black/85 backdrop-blur-sm overflow-y-auto p-4 sm:p-8"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="relative max-w-5xl mx-auto bg-card rounded-2xl overflow-hidden shadow-2xl">
@@ -431,11 +432,13 @@ export default function DetailModal({
         </div>
       </div>
     </div>
-    <TrailerModal
-      youtubeKey={showTrailer && trailer ? trailer.key : null}
-      title={detail?.title || ''}
-      onClose={() => setShowTrailer(false)}
-    />
+    {showTrailer && (
+      <TrailerModal
+        youtubeKey={trailer ? trailer.key : null}
+        title={detail?.title || ''}
+        onClose={() => setShowTrailer(false)}
+      />
+    )}
     {showPlayer && detail?.imdb_id && PlayerModal && (
       <PlayerModal
         imdb_id={detail.imdb_id}
@@ -444,7 +447,8 @@ export default function DetailModal({
         onClose={() => setShowPlayer(false)}
       />
     )}
-    </>
+  </>,
+  document.body
   );
 }
 
