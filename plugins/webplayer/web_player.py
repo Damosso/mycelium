@@ -35,16 +35,12 @@ _TEXT_SUB_CODECS  = {"subrip", "ass", "ssa", "webvtt", "mov_text", "srt"}
 
 def _web_score(stream: torrentio.TorrentioStream) -> int:
     blob = f"{stream.name} {stream.title}"
-    if stream.quality == "2160p":         return -1   # 4K: too large + browser issues
-    if torrentio._DV_RE.search(blob):    return -1   # Dolby Vision: browser-incompatible
+    if stream.quality == "2160p":           return -1  # 4K: too large for streaming
+    if torrentio._DV_RE.search(blob):      return -1  # Dolby Vision: browser-incompatible
+    if torrentio._AV1_RE.search(blob):     return -1  # AV1/VP9/VP8: no browser HLS support
 
-    is_hevc = bool(torrentio._HEVC_RE.search(blob))
-
-    # Hard size caps. HEVC gets a lower limit because transcoding is CPU-heavy;
-    # only small files (series episodes, compact films) are worth it.
-    max_gb      = _settings.get("WEB_PLAYER_MAX_SIZE_GB", 15) or 15
-    max_gb_hevc = _settings.get("WEB_PLAYER_MAX_SIZE_HEVC_GB", 4) or 4
-    if 0 < stream.size_gb > (max_gb_hevc if is_hevc else max_gb):
+    max_gb = _settings.get("WEB_PLAYER_MAX_SIZE_GB", 15) or 15
+    if 0 < stream.size_gb > max_gb:
         return -1
 
     score = 0
@@ -53,19 +49,12 @@ def _web_score(stream: torrentio.TorrentioStream) -> int:
     if torrentio._WEBDL_RE.search(blob):              score += 40
     if stream.seeders > 10:                           score += 10
 
-    # Strong size preference: smaller = faster segmentation / transcoding.
-    # Series episodes in x265 can be 200-500 MB — perfect for streaming.
+    # Smaller = faster initial buffering.
     if   0 < stream.size_gb < 0.5:  score += 55
     elif stream.size_gb     < 2:    score += 40
     elif stream.size_gb     < 4:    score += 30
     elif stream.size_gb     < 8:    score += 18
     elif stream.size_gb     < 12:   score += 8
-
-    # HEVC needs transcoding: penalise proportional to size so tiny episodes
-    # still win but large HEVC files lose to a same-size H.264 pick.
-    if is_hevc:
-        penalty = max(5, min(50, int(stream.size_gb * 8)))
-        score -= penalty
 
     return score
 
@@ -118,6 +107,7 @@ class PrepareJob:
     message:    str = ""
     token:      str | None = None
     stream_url: str | None = None
+    cdn_url:    str | None = None
     file_info:  dict | None = None
     error:      str | None = None
     _thread:    threading.Thread = field(default=None, repr=False)
@@ -193,6 +183,8 @@ def _run_job(job: PrepareJob) -> None:
             job.error  = "TorBox could not fetch the file."
             return
 
+        job.cdn_url = cdn_url
+
         job.status  = JobStatus.PROBING
         job.message = "Reading file info…"
 
@@ -205,15 +197,13 @@ def _run_job(job: PrepareJob) -> None:
         tmp_dir = PLAYER_TMP_DIR / token
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        multi_audio     = len(file_info["audio_tracks"]) > 1
-        needs_transcode = (file_info.get("video_codec") or "").lower() in {"hevc", "h265", "av1", "vp9", "vp8"}
-        seg_timeout     = 180 if needs_transcode else SEGMENT_WAIT_TIMEOUT
-        session = _start_hls(token, cdn_url, file_info, tmp_dir)
+        multi_audio = len(file_info["audio_tracks"]) > 1
+        session     = _start_hls(token, cdn_url, file_info, tmp_dir)
 
         # For multi-audio, _start_hls already waited for video segments.
         # For single-audio, wait here.
         if not multi_audio:
-            if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, seg_timeout):
+            if not _wait_segments(tmp_dir, SEGMENT_WAIT_COUNT, SEGMENT_WAIT_TIMEOUT):
                 session.proc.terminate()
                 job.status = JobStatus.ERROR
                 job.error  = "Timeout: FFmpeg produced no segments."
@@ -330,10 +320,10 @@ def seek_session(token: str, position_s: float) -> str | None:
 
     tmp_dir = session.tmp_dir
 
-    # Remove old segments and playlists (keep subtitles and master.m3u8 stub
-    # so the browser doesn't get 404 while we prepare the new segments).
-    for f in list(tmp_dir.glob("seg*.ts")) + list(tmp_dir.glob("seg_*_*.ts")):
-        f.unlink(missing_ok=True)
+    # Remove old segments and playlists.
+    for pattern in ("seg*.ts", "seg*.m4s", "seg_*_*.ts", "seg_*_*.m4s", "init*.mp4"):
+        for f in tmp_dir.glob(pattern):
+            f.unlink(missing_ok=True)
     for name in (["playlist.m3u8", "video.m3u8", "master.m3u8"]
                  + [f"audio_{i}.m3u8" for i in range(10)]):
         (tmp_dir / name).unlink(missing_ok=True)
@@ -350,84 +340,89 @@ def seek_session(token: str, position_s: float) -> str | None:
             else f"/stream/{token}/hls/playlist.m3u8")
 
 
-def _aac_args(track_index: int) -> list[str]:
-    """Encode audio track track_index as AAC-LC stereo.
 
-    Uses `a:N` stream specifiers so the options correctly target audio even
-    when video is mapped as output stream 0 before audio.
+def _audio_copy_or_transcode(track: dict, out_index: int) -> list[str]:
+    """Return FFmpeg args for a single audio output track.
+
+    Compatible codecs (AAC stereo) are copied as-is; everything else
+    (TrueHD, DTS, multichannel, Opus, Vorbis) is transcoded to AAC-LC stereo.
     """
-    i = track_index
+    codec_ok = track["codec"] in _BROWSER_AUDIO_OK and track.get("channels", 2) <= 2
+    if codec_ok:
+        return [f"-c:a:{out_index}", "copy"]
     return [
-        f"-c:a:{i}",        "aac",
-        f"-profile:a:{i}",  "aac_low",   # force AAC-LC; Chrome rejects HE/HEv2 in mpegts
-        f"-ar:a:{i}",       _AAC_SAMPLE_RATE,
-        f"-ac:a:{i}",       "2",          # downmix to stereo; Chrome won't play 5.1 AAC in mpegts
-        f"-b:a:{i}",        "192k",
+        f"-c:a:{out_index}", "aac",
+        f"-profile:a:{out_index}", "aac_low",
+        f"-ar:a:{out_index}", _AAC_SAMPLE_RATE,
+        f"-ac:a:{out_index}", "2",
+        f"-b:a:{out_index}", "192k",
     ]
 
 
 def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
                seek_offset: float = 0.0) -> HLSSession:
-    """Start (or restart) HLS segmentation.  seek_offset > 0 does a fast
-    keyframe seek in the input before beginning to generate segments."""
-    audio_tracks  = file_info["audio_tracks"]
-    multi_audio   = len(audio_tracks) > 1
+    """Start (or restart) HLS segmentation.
 
-    # Decide whether video needs transcoding.
-    # HEVC / AV1 / VP9 are not playable in browser HLS; transcode to H.264.
-    # veryfast preset gives good quality at near-realtime speed on a NAS CPU.
-    _NEEDS_TRANSCODE = {"hevc", "h265", "av1", "vp9", "vp8"}
-    video_codec      = (file_info.get("video_codec") or "h264").lower()
-    needs_transcode  = video_codec in _NEEDS_TRANSCODE
-    v_enc       = (
-        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
-        if needs_transcode else ["-c:v", "copy"]
-    )
-    seg_timeout = 180 if needs_transcode else SEGMENT_WAIT_TIMEOUT
+    Strategy:
+    - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
+    - HEVC:  fMP4 segments, video copy, audio copy-or-aac. Near-zero NAS CPU.
+             Safari plays HEVC natively; Chrome/Edge use hardware decoding.
+    - AV1/VP9/VP8: transcode to H.264 mpegts (rare, heavy but unavoidable).
 
-    # -ss BEFORE -i = fast input seeking (jumps to nearest keyframe).
+    seek_offset > 0 = fast keyframe seek in input before generating segments.
+    """
+    audio_tracks = file_info["audio_tracks"]
+    multi_audio  = len(audio_tracks) > 1
+
+    # Codec routing — always copy video, never transcode.
+    # AV1/VP9/VP8 are filtered out at selection time (_web_score).
+    # H.264  -> mpegts segments (universally supported)
+    # HEVC   -> fMP4 segments (Safari native; Chrome/Edge hardware decode)
+    _FMP4_CODECS = {"hevc", "h265"}
+    video_codec  = (file_info.get("video_codec") or "h264").lower()
+    use_fmp4     = video_codec in _FMP4_CODECS
+
+    v_enc    = ["-c:v", "copy"]
+    seg_type = "fmp4" if use_fmp4 else "mpegts"
+    seg_ext  = "m4s"  if use_fmp4 else "ts"
+
+    # -ss BEFORE -i = fast keyframe seek.
     input_args = (["-ss", f"{seek_offset:.3f}"] if seek_offset > 0 else []) + ["-i", cdn_url]
 
+    mode_label = "fmp4-copy" if use_fmp4 else "ts-copy"
+
     if multi_audio:
-        # Multi-audio: video-only stream + separate audio stream per track,
-        # stitched together via a master.m3u8 so Hls.js can switch languages.
+        # Multi-audio: video-only output + one output per audio track,
+        # bound together by a master.m3u8.
         cmd = ["ffmpeg", "-y"] + input_args
 
-        # Output 0: video-only
+        # Output 0: video only
         cmd += [
             "-map", "0:v:0", *v_enc,
             "-hls_time", "6", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
-            "-hls_segment_type", "mpegts",
-            "-hls_segment_filename", str(tmp_dir / "seg_v%05d.ts"),
-            str(tmp_dir / "video.m3u8"),
+            "-hls_segment_type", seg_type,
+            "-hls_segment_filename", str(tmp_dir / f"seg_v%05d.{seg_ext}"),
         ]
+        if use_fmp4:
+            cmd += ["-hls_fmp4_init_filename", "init_v.mp4"]
+        cmd.append(str(tmp_dir / "video.m3u8"))
 
-        # Output 1…N: one audio stream per track (single stream in each output,
-        # so index 0 always refers to that audio stream).
+        # Outputs 1…N: one audio stream each
         for i, track in enumerate(audio_tracks):
-            codec_ok = track["codec"] in _BROWSER_AUDIO_OK and track.get("channels", 2) <= 2
-            if codec_ok:
-                a_enc = ["-c:a:0", "copy"]
-            else:
-                a_enc = [
-                    "-c:a:0", "aac",
-                    "-profile:a:0", "aac_low",
-                    "-ar:a:0", _AAC_SAMPLE_RATE,
-                    "-ac:a:0", "2",
-                    "-b:a:0", "192k",
-                ]
             cmd += [
-                "-map", f"0:a:{i}", *a_enc,
+                "-map", f"0:a:{i}", *_audio_copy_or_transcode(track, 0),
                 "-hls_time", "6", "-hls_list_size", "0",
                 "-hls_flags", "independent_segments",
-                "-hls_segment_type", "mpegts",
-                "-hls_segment_filename", str(tmp_dir / f"seg_a{i}_%05d.ts"),
-                str(tmp_dir / f"audio_{i}.m3u8"),
+                "-hls_segment_type", seg_type,
+                "-hls_segment_filename", str(tmp_dir / f"seg_a{i}_%05d.{seg_ext}"),
             ]
+            if use_fmp4:
+                cmd += ["-hls_fmp4_init_filename", f"init_a{i}.mp4"]
+            cmd.append(str(tmp_dir / f"audio_{i}.m3u8"))
 
-        log.info("web_player: starting FFmpeg (multi-audio%s) for token=%s seek=%.1f",
-                 "+transcode" if needs_transcode else "", token, seek_offset)
+        log.info("web_player: FFmpeg multi-audio/%s token=%s seek=%.1f",
+                 mode_label, token, seek_offset)
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
         session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
@@ -436,15 +431,16 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         with _sessions_lock:
             _sessions[token] = session
 
-        # Wait for video segments before writing master playlist
-        _wait_segments_pattern(tmp_dir, "seg_v*.ts", SEGMENT_WAIT_COUNT, seg_timeout)
+        # Wait for first video segments before writing master playlist
+        _wait_segments_pattern(tmp_dir, f"seg_v*.{seg_ext}",
+                               SEGMENT_WAIT_COUNT, seg_timeout)
 
         # Write master.m3u8
-        lines = ["#EXTM3U"]
+        lines  = ["#EXTM3U"]
         default = "YES"
         for i, track in enumerate(audio_tracks):
-            lang   = (track.get("language") or "und").lower()
-            name   = track.get("title") or lang.upper()
+            lang  = (track.get("language") or "und").lower()
+            name  = track.get("title") or lang.upper()
             lines.append(
                 f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",'
                 f'NAME="{name}",DEFAULT={default},LANGUAGE="{lang}",'
@@ -456,26 +452,26 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         (tmp_dir / "master.m3u8").write_text("\n".join(lines) + "\n")
 
     else:
-        # Single audio: classic combined video+audio mpegts
+        # Single audio: combined video+audio output
         track = audio_tracks[0] if audio_tracks else None
-        if track and track["codec"] in _BROWSER_AUDIO_OK and track.get("channels", 2) <= 2:
-            a_codec_args = ["-c:a:0", "copy"]
-        else:
-            a_codec_args = _aac_args(0)
+        a_args = (_audio_copy_or_transcode(track, 0) if track else [])
 
         cmd = [
             "ffmpeg", "-y", *input_args,
             "-map", "0:v:0",
-            *((["-map", "0:a:0"] + a_codec_args) if track else ["-an"]),
+            *((["-map", "0:a:0"] + a_args) if track else ["-an"]),
             *v_enc,
             "-hls_time", "6", "-hls_list_size", "0",
             "-hls_flags", "independent_segments",
-            "-hls_segment_type", "mpegts",
-            "-hls_segment_filename", str(tmp_dir / "seg%05d.ts"),
-            str(tmp_dir / "playlist.m3u8"),
+            "-hls_segment_type", seg_type,
+            "-hls_segment_filename", str(tmp_dir / f"seg%05d.{seg_ext}"),
         ]
-        log.info("web_player: starting FFmpeg (single-audio%s) for token=%s seek=%.1f",
-                 "+transcode" if needs_transcode else "", token, seek_offset)
+        if use_fmp4:
+            cmd += ["-hls_fmp4_init_filename", "init.mp4"]
+        cmd.append(str(tmp_dir / "playlist.m3u8"))
+
+        log.info("web_player: FFmpeg single-audio/%s token=%s seek=%.1f",
+                 mode_label, token, seek_offset)
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
         session = HLSSession(token=token, proc=proc, tmp_dir=tmp_dir,
@@ -488,7 +484,14 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
 
 
 def _wait_segments(tmp_dir: Path, count: int, timeout: float) -> bool:
-    return _wait_segments_pattern(tmp_dir, "seg*.ts", count, timeout)
+    """Wait until at least `count` segments exist (either .ts or .m4s)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = len(list(tmp_dir.glob("seg*.ts"))) + len(list(tmp_dir.glob("seg*.m4s")))
+        if found >= count:
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _wait_segments_pattern(tmp_dir: Path, pattern: str, count: int, timeout: float) -> bool:

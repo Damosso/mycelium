@@ -1,6 +1,6 @@
 import db
 import auth
-from flask import Blueprint, abort, jsonify, request, send_file
+from flask import Blueprint, abort, jsonify, request, send_file, Response
 from flask import session as flask_session
 from . import web_player
 
@@ -37,6 +37,7 @@ def web_player_status(job_id: str):
         message    = job.message,
         token      = job.token,
         stream_url = job.stream_url,
+        cdn_url    = job.cdn_url,
         file_info  = job.file_info,
         error      = job.error,
     )
@@ -44,7 +45,11 @@ def web_player_status(job_id: str):
 
 @bp.get("/stream/<token>/hls/<path:filename>")
 def stream_hls_file(token: str, filename: str):
-    """Serve any HLS file for a session (master.m3u8, playlist.m3u8, audio/video sub-playlists, .ts segments)."""
+    """Serve any HLS file for a session.
+
+    Supports mpegts (.ts) and fragmented MP4 (.m4s + init.mp4) segments,
+    plus all playlist variants (.m3u8).
+    """
     if "/" in filename:
         abort(400)
     s = web_player.get_session(token)
@@ -58,6 +63,10 @@ def stream_hls_file(token: str, filename: str):
         return send_file(p, mimetype="application/vnd.apple.mpegurl")
     if filename.endswith(".ts"):
         return send_file(p, mimetype="video/mp2t")
+    if filename.endswith(".m4s"):
+        return send_file(p, mimetype="video/iso.segment")
+    if filename.endswith(".mp4"):
+        return send_file(p, mimetype="video/mp4")
     abort(400)
 
 
@@ -103,3 +112,109 @@ def stream_save_position(token: str):
         duration_s = d.get("duration_s"),
     )
     return jsonify(ok=True)
+
+
+_INSTALLER_SCRIPT = r"""#!/usr/bin/env bash
+# Mycelium native player installer for macOS
+# Registers the mycelium:// URL scheme — opens streams in IINA, mpv, or VLC.
+set -euo pipefail
+
+APP_NAME="MyceliumPlayer"
+APP_DIR="/Applications/${APP_NAME}.app"
+CONTENTS="${APP_DIR}/Contents"
+MACOS="${CONTENTS}/MacOS"
+RES="${CONTENTS}/Resources"
+
+echo "Installing ${APP_NAME}.app …"
+
+# ── App bundle skeleton ─────────────────────────────────────────────────────
+mkdir -p "${MACOS}" "${RES}"
+
+# ── Handler script ──────────────────────────────────────────────────────────
+cat > "${MACOS}/${APP_NAME}" << 'HANDLER'
+#!/usr/bin/env bash
+# $1 = mycelium://play?url=<encoded-url>
+RAW_SCHEME="${1:-}"
+if [ -z "${RAW_SCHEME}" ]; then exit 1; fi
+
+# Extract the video URL from the mycelium://play?url=... argument
+VIDEO_URL=$(python3 -c "
+import sys, urllib.parse
+raw = sys.argv[1]
+qs  = urllib.parse.urlparse(raw).query
+print(urllib.parse.parse_qs(qs).get('url', [''])[0])
+" "${RAW_SCHEME}")
+
+if [ -z "${VIDEO_URL}" ]; then exit 1; fi
+
+# Player preference: IINA > mpv > VLC
+if [ -d "/Applications/IINA.app" ]; then
+    ENCODED=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=''))" "${VIDEO_URL}")
+    open "iina://open?url=${ENCODED}"
+elif command -v mpv &>/dev/null; then
+    exec mpv --no-terminal "${VIDEO_URL}"
+elif [ -d "/Applications/VLC.app" ]; then
+    open -a VLC "${VIDEO_URL}"
+else
+    osascript -e 'display alert "Mycelium Player" message "No supported player found.\nInstall IINA (iina.io) or mpv (mpv.io)."'
+fi
+HANDLER
+chmod +x "${MACOS}/${APP_NAME}"
+
+# ── Info.plist ──────────────────────────────────────────────────────────────
+cat > "${CONTENTS}/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>nl.mycelium.player</string>
+    <key>CFBundleName</key>
+    <string>MyceliumPlayer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mycelium Player</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>MyceliumPlayer</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>Mycelium stream</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>mycelium</string>
+            </array>
+        </dict>
+    </array>
+    <key>LSBackgroundOnly</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+</dict>
+</plist>
+PLIST
+
+# ── Register with Launch Services ───────────────────────────────────────────
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -f "${APP_DIR}" 2>/dev/null || true
+
+echo ""
+echo "Done! MyceliumPlayer.app installed in /Applications."
+echo "The mycelium:// URL scheme is now active."
+echo ""
+echo "Player priority: IINA > mpv > VLC"
+echo "Install IINA from https://iina.io for best results."
+"""
+
+
+@bp.get("/ui/api/web-player/install-macos")
+def web_player_install_macos():
+    """Download the macOS installer shell script for the mycelium:// URL scheme."""
+    return Response(
+        _INSTALLER_SCRIPT,
+        mimetype="application/x-sh",
+        headers={"Content-Disposition": 'attachment; filename="install-mycelium-player.sh"'},
+    )
