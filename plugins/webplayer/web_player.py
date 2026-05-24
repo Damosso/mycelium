@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 PLAYER_TMP_DIR       = Path("/tmp/mycelium-player")
 SEGMENT_WAIT_COUNT   = 3
-SEGMENT_WAIT_TIMEOUT = 45
+SEGMENT_WAIT_TIMEOUT = 90
 SESSION_IDLE_CLEANUP = 1800
 
 _BROWSER_AUDIO_OK    = {"aac"}   # vorbis/opus not reliable in mpegts HLS
@@ -189,6 +189,21 @@ def _run_job(job: PrepareJob) -> None:
             return
 
         job.cdn_url = cdn_url
+
+        # Check if we already have a live FFmpeg session for this token.
+        # If so, skip the probe + start steps and go straight to ready.
+        with _sessions_lock:
+            existing_session = _sessions.get(token)
+
+        if existing_session and existing_session.proc.poll() is None:
+            log.info("web_player: reusing active session for token=%s", token)
+            multi_audio = len(existing_session.file_info.get("audio_tracks", [])) > 1
+            job.file_info  = existing_session.file_info
+            job.status     = JobStatus.READY
+            job.message    = "Ready"
+            job.stream_url = (f"/stream/{token}/hls/master.m3u8" if multi_audio
+                              else f"/stream/{token}/hls/playlist.m3u8")
+            return
 
         job.status  = JobStatus.PROBING
         job.message = "Reading file info…"
