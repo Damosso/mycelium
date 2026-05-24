@@ -1862,7 +1862,8 @@
     const body = {};
     body[field] = !!val;
     await fetch(`/ui/api/users/${id}/update`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
       body: JSON.stringify(body)
     });
     loadUsersTab();
