@@ -372,13 +372,13 @@
   <!-- ── Overview ── -->
   <div id="tab-overview" class="tab-pane">
     <div class="stats" id="overview-stats">
-      <div class="stat"><div class="stat-val" id="ov-movies">—</div><div class="stat-lbl">Movies</div></div>
-      <div class="stat"><div class="stat-val" id="ov-episodes">—</div><div class="stat-lbl">Episodes</div></div>
-      <div class="stat"><div class="stat-val" id="ov-series">—</div><div class="stat-lbl">Series</div></div>
-      <div class="stat"><div class="stat-val" id="ov-wanted">—</div><div class="stat-lbl">Wanted</div></div>
-      <div class="stat"><div class="stat-val" id="ov-success">—</div><div class="stat-lbl">Success 7d</div>
+      <div class="stat"><div class="stat-val" id="ov-movies"> - </div><div class="stat-lbl">Movies</div></div>
+      <div class="stat"><div class="stat-val" id="ov-episodes"> - </div><div class="stat-lbl">Episodes</div></div>
+      <div class="stat"><div class="stat-val" id="ov-series"> - </div><div class="stat-lbl">Series</div></div>
+      <div class="stat"><div class="stat-val" id="ov-wanted"> - </div><div class="stat-lbl">Wanted</div></div>
+      <div class="stat"><div class="stat-val" id="ov-success"> - </div><div class="stat-lbl">Success 7d</div>
         <div class="stat-sub" id="ov-success-sub"></div></div>
-      <div class="stat"><div class="stat-val" id="ov-torbox-quota">—</div><div class="stat-lbl">TorBox adds 1h</div>
+      <div class="stat"><div class="stat-val" id="ov-torbox-quota"> - </div><div class="stat-lbl">TorBox adds 1h</div>
         <div class="stat-sub" id="ov-torbox-quota-sub"></div></div>
     </div>
 
@@ -435,7 +435,7 @@
           <code id="seerr-url" style="display:block;background:var(--panel2);padding:6px 10px;border-radius:4px"></code>
         </div>
         <div>
-          <div class="dim" style="margin-bottom:2px">TorBox push notification URL — configure in TorBox settings to skip polling</div>
+          <div class="dim" style="margin-bottom:2px">TorBox push notification URL  -  configure in TorBox settings to skip polling</div>
           <code id="torbox-url" style="display:block;background:var(--panel2);padding:6px 10px;border-radius:4px"></code>
         </div>
         <div>
@@ -614,7 +614,7 @@
     <div class="section-hdr">
       <span class="section-title">Runtime Settings</span>
       <div style="display:flex;gap:10px;align-items:center">
-        <a href="/setup" class="btn btn-secondary btn-sm" style="text-decoration:none">🧙 Re-run wizard</a>
+        <a href="/setup?rerun=1" class="btn btn-secondary btn-sm" style="text-decoration:none">🧙 Re-run wizard</a>
         <span class="dim" style="font-size:11px">⚡ = hot-reload (no restart) · ⚠ = restart required · ✱ = currently overrides .env</span>
       </div>
     </div>
@@ -1044,7 +1044,7 @@
       const totalFailed = (d.failures || []).reduce((a, m) => a + (m.count || 0), 0);
       el.innerHTML = `
         <div style="display:flex;gap:18px;flex-wrap:wrap">
-          <div><div class="stat-val" style="font-size:18px">${lat ? lat.avg_real.toFixed(1) + 's' : '—'}</div><div class="stat-lbl">Avg latency</div></div>
+          <div><div class="stat-val" style="font-size:18px">${lat ? lat.avg_real.toFixed(1) + 's' : ' - '}</div><div class="stat-lbl">Avg latency</div></div>
           <div><div class="stat-val" style="font-size:18px">${totalAdded}</div><div class="stat-lbl">Added</div></div>
           <div><div class="stat-val" style="font-size:18px;color:var(--red)">${totalFailed}</div><div class="stat-lbl">Failed</div></div>
         </div>`;
@@ -1194,10 +1194,10 @@
           } else {
             const isSecret = /KEY|TOKEN|SECRET|PASSWORD/.test(it.key);
             if (isSecret) {
-              // Never pre-fill secret fields — prevents browser password manager from
+              // Never pre-fill secret fields  -  prevents browser password manager from
               // overwriting real values with saved site passwords.
               // Empty = "keep existing"; type something to replace it.
-              const placeholder = it.value ? '(already set — type to replace)' : '(not set)';
+              const placeholder = it.value ? '(already set  -  type to replace)' : '(not set)';
               input = `<input type="password" name="setting_${it.key}" value="" placeholder="${placeholder}" autocomplete="new-password" style="width:340px">`;
             } else {
               input = `<input type="text" name="setting_${it.key}" value="${val}" style="width:340px">`;
@@ -1257,10 +1257,10 @@
       d.items.forEach(o => {
         body.innerHTML += `<tr>
           <td><a href="https://www.imdb.com/title/${o.imdb_id}" target="_blank">${o.imdb_id}</a></td>
-          <td class="mono">${o.quality_preference || '—'}</td>
-          <td class="dim">${o.allow_4k === null ? '—' : (o.allow_4k ? 'yes' : 'no')}</td>
-          <td class="dim">${o.prefer_hevc === null ? '—' : (o.prefer_hevc ? 'yes' : 'no')}</td>
-          <td class="dim" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.notes || '—'}</td>
+          <td class="mono">${o.quality_preference || ' - '}</td>
+          <td class="dim">${o.allow_4k === null ? ' - ' : (o.allow_4k ? 'yes' : 'no')}</td>
+          <td class="dim">${o.prefer_hevc === null ? ' - ' : (o.prefer_hevc ? 'yes' : 'no')}</td>
+          <td class="dim" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.notes || ' - '}</td>
           <td><form method="post" action="/ui/show-override-delete/${o.imdb_id}" style="display:inline">
             <button class="btn btn-sm btn-danger">Clear</button>
           </form></td>
@@ -1300,9 +1300,9 @@
       if (d.error) { body.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${d.error}</td></tr>`; return; }
       body.innerHTML = '';
       d.torrents.forEach(t => {
-        const sizeGB = t.size ? (t.size / 1e9).toFixed(2) + ' GB' : '—';
+        const sizeGB = t.size ? (t.size / 1e9).toFixed(2) + ' GB' : ' - ';
         const state = (t.download_state || '').toLowerCase();
-        const stateBadge = `<span class="badge badge-${state}">${state || '—'}</span>`;
+        const stateBadge = `<span class="badge badge-${state}">${state || ' - '}</span>`;
         body.innerHTML += `<tr>
           <td style="max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.name}">${t.name}</td>
           <td>${stateBadge}</td>
@@ -1518,7 +1518,7 @@
   async function forceRescan() {
     try {
       await fetch('/ui/strm-rescan', { method: 'POST' });
-      toast('strm rescan', 'Started — check Logs', 'ok');
+      toast('strm rescan', 'Started  -  check Logs', 'ok');
     } catch(e) { toast('Rescan failed', e.message, 'err'); }
   }
 
@@ -1895,10 +1895,10 @@
         <tr>
           <td>${htmlEsc(u.username)}</td>
           <td>${htmlEsc(u.role)}</td>
-          <td>${u.auto_approve ? '✓' : '—'}</td>
+          <td>${u.auto_approve ? '✓' : ' - '}</td>
           <td>${u.enabled ? '✓' : '✗'}</td>
-          <td style="font-size:11px">${pluginCells || '<span class="dim">—</span>'}</td>
-          <td>${htmlEsc(u.last_login || '—')}</td>
+          <td style="font-size:11px">${pluginCells || '<span class="dim"> - </span>'}</td>
+          <td>${htmlEsc(u.last_login || ' - ')}</td>
           <td>
             <button class="btn btn-secondary btn-sm" onclick="toggleAutoApprove(${u.id}, ${u.auto_approve ? 0 : 1})">${u.auto_approve ? 'Disable auto' : 'Enable auto'}</button>
             <button class="btn btn-secondary btn-sm" onclick="toggleEnabled(${u.id}, ${u.enabled ? 0 : 1})">${u.enabled ? 'Disable' : 'Enable'}</button>
@@ -2001,7 +2001,7 @@
       } else {
         sub.textContent = '';
       }
-      // Breakdown card — only show when something is consuming the quota
+      // Breakdown card  -  only show when something is consuming the quota
       const card = document.getElementById('quota-breakdown');
       const body = document.getElementById('quota-breakdown-body');
       const reasons = Object.entries(q.by_reason || {}).sort((a, b) => b[1] - a[1]);
@@ -2036,7 +2036,7 @@
   async function arrStatus() {
     const r = await fetch('/ui/api/arr-import/status');
     const j = await r.json();
-    const s = `${j.kind || '—'}: ${j.message || 'idle'}  [${j.done}/${j.total}, +${j.added} ⏭${j.skipped} ✗${j.errors}]`;
+    const s = `${j.kind || ' - '}: ${j.message || 'idle'}  [${j.done}/${j.total}, +${j.added} ⏭${j.skipped} ✗${j.errors}]`;
     document.getElementById('arr-status').textContent = s;
     if (j.running) setTimeout(arrStatus, 2000);
   }

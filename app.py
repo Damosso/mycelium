@@ -570,6 +570,9 @@ def ui_redirect():
 
 @app.get("/setup")
 def setup_wizard():
+    import settings as _settings
+    if _settings.get("SETUP_COMPLETE", False) and request.args.get("rerun") != "1":
+        return redirect(url_for("ui_dashboard"))
     return render_template("setup.html")
 
 
