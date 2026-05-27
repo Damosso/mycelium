@@ -280,7 +280,7 @@ def install_before_request(app) -> None:
         for prefix in _PUBLIC_PATHS:
             if path == prefix or path.startswith(prefix + "/") or path == prefix.rstrip("/"):
                 return None
-        if path.startswith("/stream/"):
+        if path.startswith("/stream/") or path.startswith("/spore-stream/"):
             return None
         if path.startswith("/dav"):
             return _enforce_basic_auth()
