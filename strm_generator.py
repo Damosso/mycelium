@@ -541,11 +541,30 @@ def make_stub_mkv(title: str, quality: str | None = None,
         _ebml_el(b'\x83', _ebml_uint(1)) +            # TrackType = video
         _ebml_el(b'\xB9', _ebml_uint(1)) +            # FlagEnabled
         _ebml_el(b'\x88', _ebml_uint(1)) +            # FlagDefault
-        _ebml_el(b'\x86', codec_id.encode()) +            # CodecID
+        _ebml_el(b'\x86', codec_id.encode()) +         # CodecID
         _ebml_el(b'\xE0', video_data)                  # Video
     )
+
+    # Audio track entry (placeholder so Plex plans audio transcoding)
+    # Codec: EAC3 (Dolby Digital Plus) - common in both 4K and 1080p releases.
+    # Plex maps 0:a:0 to the first audio stream FFmpeg finds in the real fstream MP4.
+    audio_data = (
+        _ebml_el(b'\xB5', struct.pack('>f', 48000.0)) +  # SamplingFrequency = 48kHz
+        _ebml_el(b'\x9F', _ebml_uint(6))                  # Channels = 6 (5.1)
+    )
+    audio_track_data = (
+        _ebml_el(b'\xD7', _ebml_uint(2)) +            # TrackNumber
+        _ebml_el(b'\x73\xC5', _ebml_uint(2)) +        # TrackUID
+        _ebml_el(b'\x83', _ebml_uint(2)) +            # TrackType = audio
+        _ebml_el(b'\xB9', _ebml_uint(1)) +            # FlagEnabled
+        _ebml_el(b'\x88', _ebml_uint(1)) +            # FlagDefault
+        _ebml_el(b'\x86', b'A_EAC3') +                # CodecID (EAC3 / DD+)
+        _ebml_el(b'\xE1', audio_data)                  # Audio
+    )
+
     tracks_el = _ebml_el(b'\x16\x54\xAE\x6B',
-                          _ebml_el(b'\xAE', track_data))
+                          _ebml_el(b'\xAE', track_data) +
+                          _ebml_el(b'\xAE', audio_track_data))
 
     # Minimal empty Cluster (Timecode=0, no frames).
     # Required so ffprobe / Plex scanner detect the video stream.
