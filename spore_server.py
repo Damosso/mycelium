@@ -29,17 +29,20 @@ _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT    = 60
 
 
-def _get_cdn_url(token: str) -> str | None:
-    """Resolve CDN URL for a token.  Uses catbox cache (fast) or full
-    materialize (slow, may re-add torrent) as fallback."""
+def _get_cdn_url(token: str, allow_readd: bool = False) -> str | None:
+    """Resolve CDN URL for a token.
+
+    Fast path: in-memory URL cache (no network calls).
+    Slow path: TorBox library check via catbox.materialize().
+      allow_readd=False during Plex library scans to avoid mass-adding torrents.
+      allow_readd=True only when a cached URL has expired at the CDN (HTTP 4xx).
+    """
     try:
         import catbox
-        # Fast path: check the in-memory URL cache first
         url = catbox._cache_get(token)
         if url:
             return url
-        # Slow path: full materialize (handles idle-released torrents)
-        return catbox.materialize(token, allow_readd=True)
+        return catbox.materialize(token, allow_readd=allow_readd)
     except Exception as exc:
         log.warning("Spore: CDN URL lookup failed for %s: %s", token, exc)
         return None
@@ -74,8 +77,9 @@ def _fetch_range(cdn_url: str, offset: int, count: int) -> bytes | None:
         return None
 
 
-def _handle(conn: socket.socket) -> None:
+def _handle(conn: socket.socket, addr) -> None:
     """Handle one Spore client connection."""
+    log.info("Spore: connection from %s", addr)
     try:
         # Read request line
         buf = b""
@@ -101,12 +105,39 @@ def _handle(conn: socket.socket) -> None:
             conn.sendall(b"ERR bad numbers\n")
             return
 
-        cdn_url = _get_cdn_url(token)
+        log.info("Spore: request token=%s offset=%d count=%d", token, offset, count)
+        cdn_url = _get_cdn_url(token, allow_readd=False)
         if not cdn_url:
             conn.sendall(b"ERR no cdn url\n")
             return
 
-        data = _fetch_range(cdn_url, offset, count)
+        # Use fast-start virtual layout if cached (moov-first, correct offsets).
+        try:
+            import mp4_faststart
+            fsh = mp4_faststart.load(token)
+        except Exception:
+            fsh = None
+
+        if fsh:
+            try:
+                data = mp4_faststart.serve_bytes(fsh, cdn_url, offset, offset + count - 1)
+            except Exception as exc:
+                log.warning("Spore: fast-start serve failed: %s", exc)
+                data = None
+        else:
+            data = _fetch_range(cdn_url, offset, count)
+
+        if data is None:
+            # CDN URL may have expired - invalidate cache and get a fresh one
+            try:
+                import catbox
+                catbox.invalidate_url_cache(token)
+                log.info("Spore: CDN URL expired for %s, refreshing", token)
+            except Exception:
+                pass
+            cdn_url = _get_cdn_url(token, allow_readd=True)
+            if cdn_url:
+                data = _fetch_range(cdn_url, offset, count)
         if data is None:
             conn.sendall(b"ERR fetch failed\n")
             return
@@ -134,7 +165,7 @@ def _serve(srv: socket.socket) -> None:
             conn, addr = srv.accept()
             t = threading.Thread(
                 target=_handle,
-                args=(conn,),
+                args=(conn, addr),
                 daemon=True,
                 name=f"spore-conn-{addr}",
             )

@@ -446,6 +446,14 @@ if cfg.SPORE_ENABLED:
     except Exception as _spore_exc:
         log.warning("Mycelium Spore server failed to start: %s", _spore_exc)
 
+# Fast-start cache lives next to plex-media stubs for easy cleanup
+try:
+    import mp4_faststart
+    mp4_faststart.init(cfg.SPORE_MEDIA_PATH)
+    log.info("MP4 fast-start cache dir: %s", cfg.SPORE_MEDIA_PATH)
+except Exception as _fsh_exc:
+    log.warning("MP4 fast-start init failed: %s", _fsh_exc)
+
 if CATCHUP_ENABLED:
     catchup.schedule()
 
@@ -1150,19 +1158,85 @@ def ui_api_poster(imdb_id: str):
 @app.get("/stream/<token>")
 def stream_redirect(token: str):
     import time as _t
+    import mp4_faststart
+
     started = _t.monotonic()
-    ua = request.headers.get("User-Agent", "?")[:80]
+    ua  = request.headers.get("User-Agent", "?")[:80]
     rng = request.headers.get("Range", "-")
+
     url = catbox.materialize(token)
-    elapsed = _t.monotonic() - started
     if not url:
         log.warning("stream: materialize FAILED token=%s ua=%r range=%s (%.1fs)",
-                    token, ua, rng, elapsed)
+                    token, ua, rng, _t.monotonic() - started)
         abort(404)
-    log.info("stream: token=%s → CDN redirect (%.1fs) ua=%r range=%s",
-             token, elapsed, ua, rng)
-    # 302 is followed more reliably by some mobile players / ffmpeg than 307.
-    return redirect(url, code=302)
+
+    # Try to serve as a virtual fast-start MP4 (moov first, Range-capable).
+    # On first hit the cache is empty → fall back to 302 and build in background.
+    info = mp4_faststart.load(token)
+
+    if info is None:
+        # Kick off background cache build so the next request will be fast.
+        cdn_url_snapshot = url
+        tok_snapshot     = token
+        threading.Thread(
+            target=mp4_faststart.build_and_cache,
+            args=(cdn_url_snapshot, tok_snapshot),
+            daemon=True,
+            name=f"fsh-build-{token[:8]}",
+        ).start()
+        log.info("stream: token=%s → 302 (no fast-start cache yet, building) ua=%r",
+                 token, ua)
+        return redirect(url, code=302)
+
+    # Fast-start cache available: serve as proper streaming MP4 with Range support.
+    file_size = info["cdn_size"]
+    range_hdr = request.headers.get("Range")
+
+    if range_hdr:
+        try:
+            unit, ranges_str = range_hdr.split("=", 1)
+            r_start_s, r_end_s = ranges_str.split("-", 1)
+            v_start = int(r_start_s) if r_start_s else 0
+            v_end   = int(r_end_s)   if r_end_s   else file_size - 1
+        except Exception:
+            abort(416)
+        v_end   = min(v_end, file_size - 1)
+        status  = 206
+    else:
+        v_start, v_end, status = 0, file_size - 1, 200
+
+    length = v_end - v_start + 1
+
+    cdn_url = url  # already materialised above
+
+    def _generate():
+        CHUNK = 2 << 20  # 2 MB per CDN fetch
+        pos = v_start
+        while pos <= v_end:
+            end = min(pos + CHUNK - 1, v_end)
+            try:
+                data = mp4_faststart.serve_bytes(info, cdn_url, pos, end)
+            except Exception as exc:
+                log.warning("stream proxy: error at v=%d token=%s: %s", pos, token, exc)
+                break
+            if not data:
+                break
+            yield data
+            pos += len(data)
+
+    resp = Response(
+        stream_with_context(_generate()),
+        status=status,
+        mimetype="video/mp4",
+        direct_passthrough=True,
+    )
+    resp.headers["Accept-Ranges"]  = "bytes"
+    resp.headers["Content-Length"] = str(length)
+    if status == 206:
+        resp.headers["Content-Range"] = f"bytes {v_start}-{v_end}/{file_size}"
+    log.info("stream: token=%s → fast-start proxy bytes=%d-%d/%d (%.1fs) ua=%r",
+             token, v_start, v_end, file_size, _t.monotonic() - started, ua)
+    return resp
 
 
 @app.get("/ui/api/virtual-items")
