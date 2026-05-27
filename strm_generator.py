@@ -483,15 +483,79 @@ def _codec_id_for_quality(quality: str | None) -> str:
     return 'V_MPEG4/ISO/AVC'
 
 
+_FFCODEC_TO_MKV_AUDIO: dict[str, str] = {
+    "eac3":     "A_EAC3",
+    "ac3":      "A_AC3",
+    "truehd":   "A_TRUEHD",
+    "mlp":      "A_TRUEHD",
+    "dts":      "A_DTS",
+    "aac":      "A_AAC",
+    "opus":     "A_OPUS",
+    "flac":     "A_FLAC",
+    "mp3":      "A_MPEG/L3",
+    "vorbis":   "A_VORBIS",
+    "pcm_s16le": "A_PCM/INT/LIT",
+    "pcm_s24le": "A_PCM/INT/LIT",
+    "pcm_s32le": "A_PCM/INT/LIT",
+}
+
+_FFCODEC_TO_MKV_SUB: dict[str, str] = {
+    "subrip":              "S_TEXT/UTF8",
+    "ass":                 "S_TEXT/ASS",
+    "ssa":                 "S_TEXT/ASS",
+    "webvtt":              "S_TEXT/WEBVTT",
+    "hdmv_pgs_subtitle":  "S_HDMV/PGS",
+    "dvd_subtitle":        "S_VOBSUB",
+    "mov_text":            "S_TEXT/UTF8",
+}
+
+
+def _ebml_audio_track_entry(track_num: int, codec_mkv: str, lang: str,
+                             channels: int, sample_rate: float,
+                             is_default: bool) -> bytes:
+    lang_bytes = lang.encode("ascii", errors="replace")[:3].ljust(3)[:3]
+    audio_el = (
+        _ebml_el(b'\xB5', struct.pack('>f', sample_rate)) +
+        _ebml_el(b'\x9F', _ebml_uint(channels))
+    )
+    body = (
+        _ebml_el(b'\xD7', _ebml_uint(track_num)) +
+        _ebml_el(b'\x73\xC5', _ebml_uint(track_num)) +
+        _ebml_el(b'\x83', _ebml_uint(2)) +
+        _ebml_el(b'\xB9', _ebml_uint(1)) +
+        _ebml_el(b'\x88', _ebml_uint(1 if is_default else 0)) +
+        _ebml_el(b'\x22\xB5\x9C', lang_bytes) +
+        _ebml_el(b'\x86', codec_mkv.encode()) +
+        _ebml_el(b'\xE1', audio_el)
+    )
+    return _ebml_el(b'\xAE', body)
+
+
+def _ebml_subtitle_track_entry(track_num: int, codec_mkv: str, lang: str) -> bytes:
+    lang_bytes = lang.encode("ascii", errors="replace")[:3].ljust(3)[:3]
+    body = (
+        _ebml_el(b'\xD7', _ebml_uint(track_num)) +
+        _ebml_el(b'\x73\xC5', _ebml_uint(track_num)) +
+        _ebml_el(b'\x83', _ebml_uint(0x11)) +
+        _ebml_el(b'\xB9', _ebml_uint(1)) +
+        _ebml_el(b'\x88', _ebml_uint(0)) +
+        _ebml_el(b'\x22\xB5\x9C', lang_bytes) +
+        _ebml_el(b'\x86', codec_mkv.encode())
+    )
+    return _ebml_el(b'\xAE', body)
+
+
 def make_stub_mkv(title: str, quality: str | None = None,
                    duration_sec: float = 7200.0,
-                   codec_id: str | None = None) -> bytes:
+                   codec_id: str | None = None,
+                   audio_tracks: list[dict] | None = None,
+                   subtitle_tracks: list[dict] | None = None) -> bytes:
     """Generate a minimal valid MKV file for Plex scanning.
 
-    Contains EBML header + Segment Info (title, duration) + one fake video
-    track (resolution derived from quality).  No Cluster = no actual video
-    data.  Plex scanner parses the Tracks element and indexes the file; the
-    Spore interceptor serves real bytes at playback time.
+    audio_tracks: list of dicts with keys codec, language, channels, sample_rate.
+    subtitle_tracks: list of dicts with keys codec, language.
+    When audio_tracks is None, a single TrueHD placeholder is used so Plex
+    always invokes the transcoder (never direct-plays the stub).
     """
     width, height = 1920, 1080
     if quality:
@@ -520,53 +584,69 @@ def make_stub_mkv(title: str, quality: str | None = None,
 
     # Segment Info
     info_data = (
-        _ebml_el(b'\x2A\xD7\xB1', _ebml_uint(1_000_000)) +          # TimestampScale = 1ms
-        _ebml_el(b'\x44\x89', struct.pack('>d', duration_sec * 1000.0)) +  # Duration (float64)
-        _ebml_el(b'\x7B\xA9', title.encode('utf-8')) +                # Title
-        _ebml_el(b'\x4D\x80', b'Mycelium Spore') +                    # MuxingApp
-        _ebml_el(b'\x57\x41', b'Mycelium Spore')                      # WritingApp
+        _ebml_el(b'\x2A\xD7\xB1', _ebml_uint(1_000_000)) +
+        _ebml_el(b'\x44\x89', struct.pack('>d', duration_sec * 1000.0)) +
+        _ebml_el(b'\x7B\xA9', title.encode('utf-8')) +
+        _ebml_el(b'\x4D\x80', b'Mycelium Spore') +
+        _ebml_el(b'\x57\x41', b'Mycelium Spore')
     )
     info_el = _ebml_el(b'\x15\x49\xA9\x66', info_data)
 
-    # Video track entry
+    # Video track
     video_data = (
-        _ebml_el(b'\xB0', _ebml_uint(width)) +        # PixelWidth
-        _ebml_el(b'\xBA', _ebml_uint(height)) +       # PixelHeight
-        _ebml_el(b'\x54\xB0', _ebml_uint(width)) +   # DisplayWidth
-        _ebml_el(b'\x54\xBA', _ebml_uint(height))     # DisplayHeight
+        _ebml_el(b'\xB0', _ebml_uint(width)) +
+        _ebml_el(b'\xBA', _ebml_uint(height)) +
+        _ebml_el(b'\x54\xB0', _ebml_uint(width)) +
+        _ebml_el(b'\x54\xBA', _ebml_uint(height))
     )
-    track_data = (
-        _ebml_el(b'\xD7', _ebml_uint(1)) +            # TrackNumber
-        _ebml_el(b'\x73\xC5', _ebml_uint(1)) +        # TrackUID
-        _ebml_el(b'\x83', _ebml_uint(1)) +            # TrackType = video
-        _ebml_el(b'\xB9', _ebml_uint(1)) +            # FlagEnabled
-        _ebml_el(b'\x88', _ebml_uint(1)) +            # FlagDefault
-        _ebml_el(b'\x86', codec_id.encode()) +         # CodecID
-        _ebml_el(b'\xE0', video_data)                  # Video
-    )
+    video_track = _ebml_el(b'\xAE', (
+        _ebml_el(b'\xD7', _ebml_uint(1)) +
+        _ebml_el(b'\x73\xC5', _ebml_uint(1)) +
+        _ebml_el(b'\x83', _ebml_uint(1)) +
+        _ebml_el(b'\xB9', _ebml_uint(1)) +
+        _ebml_el(b'\x88', _ebml_uint(1)) +
+        _ebml_el(b'\x86', codec_id.encode()) +
+        _ebml_el(b'\xE0', video_data)
+    ))
 
-    # Audio track entry (placeholder so Plex always invokes the transcoder).
-    # TrueHD: no client can passthrough TrueHD natively, so Plex always chooses
-    # "direct stream video (copy) + transcode audio" instead of full direct play.
-    # This guarantees the transcoder wrapper runs and FFmpeg reads the real CDN
-    # data via spore-stream. Video is copied as-is (HEVC stays HEVC on Android TV).
-    audio_data = (
-        _ebml_el(b'\xB5', struct.pack('>f', 48000.0)) +  # SamplingFrequency = 48kHz
-        _ebml_el(b'\x9F', _ebml_uint(8))                  # Channels = 8 (7.1, TrueHD max)
-    )
-    audio_track_data = (
-        _ebml_el(b'\xD7', _ebml_uint(2)) +            # TrackNumber
-        _ebml_el(b'\x73\xC5', _ebml_uint(2)) +        # TrackUID
-        _ebml_el(b'\x83', _ebml_uint(2)) +            # TrackType = audio
-        _ebml_el(b'\xB9', _ebml_uint(1)) +            # FlagEnabled
-        _ebml_el(b'\x88', _ebml_uint(1)) +            # FlagDefault
-        _ebml_el(b'\x86', b'A_TRUEHD') +              # CodecID (TrueHD / Atmos)
-        _ebml_el(b'\xE1', audio_data)                  # Audio
-    )
+    tracks_data = video_track
+    next_num = 2
 
-    tracks_el = _ebml_el(b'\x16\x54\xAE\x6B',
-                          _ebml_el(b'\xAE', track_data) +
-                          _ebml_el(b'\xAE', audio_track_data))
+    if audio_tracks:
+        for i, at in enumerate(audio_tracks):
+            mkv_codec = _FFCODEC_TO_MKV_AUDIO.get(
+                (at.get("codec") or "").lower(), "A_EAC3"
+            )
+            tracks_data += _ebml_audio_track_entry(
+                track_num=next_num,
+                codec_mkv=mkv_codec,
+                lang=(at.get("language") or "und")[:3],
+                channels=int(at.get("channels") or 2),
+                sample_rate=float(at.get("sample_rate") or 48000),
+                is_default=(i == 0),
+            )
+            next_num += 1
+    else:
+        # TrueHD placeholder: forces Plex to invoke transcoder instead of
+        # direct-playing the stub. No client can passthrough TrueHD natively.
+        tracks_data += _ebml_audio_track_entry(
+            track_num=2, codec_mkv="A_TRUEHD", lang="und",
+            channels=8, sample_rate=48000.0, is_default=True,
+        )
+        next_num = 3
+
+    for st in (subtitle_tracks or []):
+        mkv_codec = _FFCODEC_TO_MKV_SUB.get(
+            (st.get("codec") or "").lower(), "S_TEXT/UTF8"
+        )
+        tracks_data += _ebml_subtitle_track_entry(
+            track_num=next_num,
+            codec_mkv=mkv_codec,
+            lang=(st.get("language") or "und")[:3],
+        )
+        next_num += 1
+
+    tracks_el = _ebml_el(b'\x16\x54\xAE\x6B', tracks_data)
 
     # Minimal empty Cluster (Timecode=0, no frames).
     # Required so ffprobe / Plex scanner detect the video stream.
@@ -746,6 +826,61 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
     log.info("Spore regenerate: total=%d regenerated=%d skipped=%d errors=%d",
              total, regenerated, skipped, errors)
     return {"total": total, "regenerated": regenerated, "skipped": skipped, "errors": errors}
+
+
+def update_stub_from_probe(token: str, audio_streams: list[dict],
+                            subtitle_streams: list[dict]) -> bool:
+    """Rewrite the stub MKV for token with real audio and subtitle tracks from ffprobe.
+
+    Called after build_and_cache() completes so subsequent Plex analyses show
+    the correct track layout (enabling audio switching and subtitle selection).
+    Returns True if the stub was updated.
+    """
+    item = db.get_virtual_item(token)
+    if not item:
+        return False
+    strm_path_str = item.get("strm_path")
+    if not strm_path_str:
+        return False
+
+    strm_path = Path(strm_path_str)
+    mkv_path  = _spore_stub_dir(strm_path) / (strm_path.stem + ".mkv")
+    if not mkv_path.parent.exists():
+        return False
+
+    audio_tracks = [
+        {
+            "codec":       s.get("codec_name", "eac3"),
+            "language":    (s.get("tags") or {}).get("language", "und")[:3],
+            "channels":    int(s.get("channels") or 2),
+            "sample_rate": float(s.get("sample_rate") or 48000),
+        }
+        for s in audio_streams
+    ]
+    subtitle_tracks = [
+        {
+            "codec":    s.get("codec_name", "subrip"),
+            "language": (s.get("tags") or {}).get("language", "und")[:3],
+        }
+        for s in subtitle_streams
+    ]
+
+    try:
+        stub = make_stub_mkv(
+            item.get("title") or strm_path.stem,
+            item.get("quality"),
+            audio_tracks=audio_tracks or None,
+            subtitle_tracks=subtitle_tracks or None,
+        )
+        mkv_path.write_bytes(stub)
+        log.info(
+            "Spore: updated stub for token=%s with %d audio + %d subtitle tracks",
+            token, len(audio_tracks), len(subtitle_tracks),
+        )
+        return True
+    except Exception as exc:
+        log.warning("Spore: stub update failed for token=%s: %s", token, exc)
+        return False
 
 
 def _write_strm(path: Path, url: str) -> bool:

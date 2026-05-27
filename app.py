@@ -1200,8 +1200,32 @@ def spore_stream_proxy(token: str):
     if info is None:
         cdn_url_snap = url
         tok_snap     = token
+
+        def _build_then_probe(cdn_url: str, tok: str) -> None:
+            ok = mp4_faststart.build_and_cache(cdn_url, tok)
+            if not ok:
+                return
+            # Probe real stream layout so stub can be updated with actual tracks.
+            import json as _json, subprocess as _sp
+            try:
+                res = _sp.run(
+                    ["ffprobe", "-v", "quiet", "-print_format", "json",
+                     "-show_streams", cdn_url],
+                    capture_output=True, timeout=60,
+                )
+                if res.returncode != 0:
+                    return
+                streams = _json.loads(res.stdout).get("streams", [])
+                audio = [s for s in streams if s.get("codec_type") == "audio"]
+                subs  = [s for s in streams if s.get("codec_type") == "subtitle"]
+                if audio or subs:
+                    import strm_generator as _sg
+                    _sg.update_stub_from_probe(tok, audio, subs)
+            except Exception as exc:
+                log.warning("spore-stream: post-build probe failed for %s: %s", tok, exc)
+
         threading.Thread(
-            target=mp4_faststart.build_and_cache,
+            target=_build_then_probe,
             args=(cdn_url_snap, tok_snap),
             daemon=True,
             name=f"fsh-{token[:8]}",
