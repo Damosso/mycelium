@@ -227,7 +227,7 @@ def recheck_wanted() -> int:
     for w in wanted:
         usage = torbox.createtorrent_usage()
         if usage["count"] >= torbox._CREATETORRENT_LIMIT_HOUR - 2:
-            log.info("Wanted: createtorrent budget low (%d/%d) — pausing recheck",
+            log.info("Wanted: createtorrent budget low (%d/%d)  -  pausing recheck",
                      usage["count"], torbox._CREATETORRENT_LIMIT_HOUR)
             break
         req = MediaRequest(title=w["title"], media_type="movie",
@@ -235,7 +235,7 @@ def recheck_wanted() -> int:
         try:
             ok, winner = processor._process_movie(req)
         except processor.RateLimited:
-            log.info("Wanted: rate limited — pausing recheck")
+            log.info("Wanted: rate limited  -  pausing recheck")
             break
         except Exception as exc:
             log.warning("Wanted recheck failed for %s: %s", w["title"], exc)
@@ -246,7 +246,7 @@ def recheck_wanted() -> int:
             processor._WANTED.pop(w["imdb_id"], None)
             db.log_activity("found", w["title"],
                             f"acceptable release found ({winner.quality if winner else '?'})", True)
-            log.info("Wanted: %s is now available — added", w["title"])
+            log.info("Wanted: %s is now available  -  added", w["title"])
             added += 1
         else:
             # Still nothing acceptable; clear the transient wanted flag set by

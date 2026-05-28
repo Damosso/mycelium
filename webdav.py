@@ -301,7 +301,7 @@ def _get(disk: Path) -> Response:
         return Response("Upstream error", status=502)
 
     if r.status_code >= 400:
-        # Stale URL — drop the cache so the next read re-resolves
+        # Stale URL  -  drop the cache so the next read re-resolves
         with _cache_lock:
             _url_cache.pop(disk, None)
         return Response(f"Upstream {r.status_code}", status=r.status_code)

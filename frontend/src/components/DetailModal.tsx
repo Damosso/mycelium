@@ -278,7 +278,7 @@ export default function DetailModal({
                     )}
                     {monitorMode === 'future' && (
                       <p className="text-[11px] text-muted mt-1">
-                        Only episodes airing from now on — the back-catalog is skipped.
+                        Only episodes airing from now on  -  the back-catalog is skipped.
                       </p>
                     )}
                   </div>

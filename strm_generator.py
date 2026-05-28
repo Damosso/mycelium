@@ -215,6 +215,102 @@ def _canonical_movie_folder(imdb_id: str, fallback_title: str | None = None,
     return ""
 
 
+def fix_imdb_titles() -> dict:
+    """Find requests whose title is still a raw IMDB code (e.g. tt0096697), fetch the
+    real title from TMDB, rename the folder on disk, and update the DB + strm paths."""
+    import re as _re
+    import tmdb as _tmdb
+
+    _IMDB_PAT = _re.compile(r'^tt\d{6,10}$')
+    fixed: list[dict] = []
+    failed: list[dict] = []
+
+    with db._connect() as conn:
+        rows = conn.execute(
+            "SELECT imdb_id, title, media_type FROM requests WHERE title LIKE 'tt%'"
+        ).fetchall()
+    candidates = [dict(r) for r in rows if _IMDB_PAT.match(r['title'] or '')]
+
+    for row in candidates:
+        imdb_id   = row['imdb_id']
+        old_title = row['title']
+        mtype     = row['media_type']   # 'movie' or 'series'
+        kind      = 'movie' if mtype == 'movie' else 'tv'
+
+        try:
+            data    = _tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
+            key     = 'movie_results' if kind == 'movie' else 'tv_results'
+            results = data.get(key) or []
+            if not results:
+                failed.append({'imdb_id': imdb_id, 'reason': 'TMDB: no results'})
+                continue
+
+            hit       = results[0]
+            new_title = hit.get('title') if kind == 'movie' else hit.get('name')
+            year      = (hit.get('release_date') or hit.get('first_air_date') or '')[:4]
+            if not new_title:
+                failed.append({'imdb_id': imdb_id, 'reason': 'TMDB: empty title'})
+                continue
+
+            new_safe   = _safe(new_title)
+            new_folder = f"{new_safe} ({year})" if year else new_safe
+            subdir     = 'movies' if mtype == 'movie' else 'series'
+            media_root = Path(MEDIA_PATH)
+
+            # Derive current folder from the first matching strm_path in virtual_items
+            with db._connect() as conn:
+                vi = conn.execute(
+                    "SELECT strm_path FROM virtual_items WHERE imdb_id=? AND strm_path IS NOT NULL LIMIT 1",
+                    (imdb_id,)
+                ).fetchone()
+            old_folder_path = None
+            if vi and vi['strm_path']:
+                parts = Path(vi['strm_path'].replace('\\', '/')).parts
+                # strm_path looks like /data/media/series/tt0096697/Season 1/...
+                # find the index of subdir
+                for idx, p in enumerate(parts):
+                    if p == subdir and idx + 1 < len(parts):
+                        candidate = media_root / subdir / parts[idx + 1]
+                        if candidate.exists():
+                            old_folder_path = candidate
+                        break
+
+            new_folder_path = media_root / subdir / new_folder
+
+            # Update DB
+            with db._connect() as conn:
+                conn.execute("UPDATE requests SET title=? WHERE imdb_id=?", (new_title, imdb_id))
+                conn.execute("UPDATE virtual_items SET title=? WHERE imdb_id=?", (new_title, imdb_id))
+                conn.commit()
+
+            # Rename folder + update strm paths
+            renamed = False
+            if old_folder_path and old_folder_path != new_folder_path:
+                if new_folder_path.exists():
+                    # Merge: move contents into existing folder
+                    for child in old_folder_path.rglob('*'):
+                        if child.is_file():
+                            dest = new_folder_path / child.relative_to(old_folder_path)
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            child.rename(dest)
+                    old_folder_path.rmdir() if not any(old_folder_path.iterdir()) else None
+                else:
+                    old_folder_path.rename(new_folder_path)
+                db.update_virtual_strm_path_prefix(str(old_folder_path), str(new_folder_path))
+                renamed = True
+
+            fixed.append({'imdb_id': imdb_id, 'old': old_title, 'new': new_title,
+                          'year': year, 'renamed': renamed})
+            log.info("fix_imdb_titles: %s -> %s (renamed=%s)", old_title, new_title, renamed)
+
+        except Exception as exc:
+            log.warning("fix_imdb_titles: failed for %s: %s", imdb_id, exc)
+            failed.append({'imdb_id': imdb_id, 'reason': str(exc)})
+
+    return {'fixed': fixed, 'failed': failed,
+            'total': len(candidates), 'fixed_count': len(fixed)}
+
+
 def _find_movie_folder_by_imdb(imdb_id: str) -> Path | None:
     """Return an existing movie folder for this imdb_id via virtual_items DB, or None."""
     items = db.get_virtual_items_by_imdb(imdb_id, media_type="movie")
@@ -747,13 +843,15 @@ def make_stub_mkv(title: str, quality: str | None = None,
             )
             next_num += 1
     else:
-        # TrueHD 8ch placeholder: no Plex client can Direct Play TrueHD without
-        # HDMI passthrough to an AV receiver, so Plex always invokes the external
-        # transcoder (our wrapper intercepts -i stub.mkv -> spore-stream URL).
-        # EAC3 would allow Direct Play on modern phones/Shield and must NOT be used.
+        # PCM 16ch placeholder: uncompressed 16-channel PCM cannot be passed
+        # through HDMI on any device (exceeds bandwidth), so Plex always invokes
+        # the external transcoder regardless of client capabilities (phones,
+        # Shield TV with AV receiver, desktop). Plex transcodes PCM natively
+        # without EAE, avoiding EAE timeouts. TrueHD 8ch would be Direct Played
+        # by Shield TV with HDMI eARC passthrough, bypassing the wrapper.
         tracks_data += _ebml_audio_track_entry(
-            track_num=2, codec_mkv="A_TRUEHD", lang="und",
-            channels=8, sample_rate=48000.0, is_default=True,
+            track_num=2, codec_mkv="A_PCM/INT/LIT", lang="und",
+            channels=16, sample_rate=48000.0, is_default=True,
         )
         next_num = 3
 
@@ -992,12 +1090,12 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
     if not mkv_path.parent.exists():
         return False
 
-    saved = db.load_spore_tracks(token) or {}
-    v_extra_hex = saved.get("video_extradata_hex") or ""
-    try:
-        v_extra = bytes.fromhex(v_extra_hex) if v_extra_hex else None
-    except ValueError:
-        v_extra = None
+    # Do NOT write video codec_private (SPS/PPS) to the stub.
+    # With real HDR10 SPS/PPS, Plex correctly identifies the content as 4K HDR10
+    # HEVC + TrueHD 7.1 and Shield TV (with AV receiver) chooses Direct Play,
+    # bypassing the wrapper entirely and returning black screen (stub has no real
+    # frames). By keeping the stub without SPS/PPS, Plex cannot determine the
+    # exact profile/level and falls back to transcoding for all clients.
 
     # Keep audio_tracks=None so make_stub_mkv uses the TrueHD 8ch placeholder.
     # TrueHD forces Plex to invoke the external transcoder (our wrapper intercepts
@@ -1011,6 +1109,22 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
         for s in subtitle_streams
     ]
 
+    # Write cdn_audio_codec to .minfo so the transcoder wrapper can inject a
+    # native (non-EAE) decoder hint, preventing EAE input-decode timeouts on
+    # heavy sessions (e.g. Shield TV + VAAPI video transcode).
+    cdn_codec = (audio_streams[0].get("codec_name") or "").lower() if audio_streams else ""
+    if cdn_codec:
+        minfo_path = mkv_path.parent / (strm_path.stem + ".minfo")
+        try:
+            if minfo_path.exists():
+                lines = minfo_path.read_text(encoding="utf-8").splitlines()
+                lines = [l for l in lines if not l.startswith("cdn_audio_codec=")]
+                lines.append(f"cdn_audio_codec={cdn_codec}")
+                minfo_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                log.info("Spore: cdn_audio_codec=%s saved to .minfo for token=%s", cdn_codec, token)
+        except Exception as exc:
+            log.warning("Spore: could not write cdn_audio_codec to .minfo for token=%s: %s", token, exc)
+
     try:
         stub = make_stub_mkv(
             item.get("title") or strm_path.stem,
@@ -1018,12 +1132,12 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
             duration_sec=duration_s or 7200.0,
             audio_tracks=None,
             subtitle_tracks=subtitle_tracks or None,
-            video_codec_private=v_extra,
+            # video_codec_private intentionally omitted: see comment above
         )
         mkv_path.write_bytes(stub)
         log.info(
-            "Spore: updated stub for token=%s with %d audio + %d subs (extradata=%d bytes)",
-            token, len(audio_streams), len(subtitle_tracks), len(v_extra or b''),
+            "Spore: updated stub for token=%s with %d audio + %d subs",
+            token, len(audio_streams), len(subtitle_tracks),
         )
         return True
     except Exception as exc:

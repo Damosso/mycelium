@@ -79,7 +79,7 @@ def restore(name: str) -> bool:
             shutil.copy2(dst, safety)
             log.info("Restore: stashed current DB at %s", safety.name)
         shutil.copy2(src, dst)
-        log.warning("Restore: replaced live DB with %s — restart Mycelium", name)
+        log.warning("Restore: replaced live DB with %s  -  restart Mycelium", name)
         return True
     except Exception as exc:
         log.error("Restore failed: %s", exc)

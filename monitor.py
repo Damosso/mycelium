@@ -1,4 +1,4 @@
-"""Series monitoring and movie sync — periodic tasks running alongside the webhook."""
+"""Series monitoring and movie sync  -  periodic tasks running alongside the webhook."""
 
 import glob
 import logging
@@ -70,10 +70,10 @@ def _sync_wanted(imdb_id: str, tmdb_id: int, title: str, seasons: list[int],
     """Refresh the wanted-episode list for the monitored seasons.
 
     monitor_mode:
-      all     — every episode of the monitored seasons (back-catalog included)
-      future  — only episodes airing on/after `since` (the date the series was
+      all      -  every episode of the monitored seasons (back-catalog included)
+      future   -  only episodes airing on/after `since` (the date the series was
                 added); already-aired episodes are not monitored
-      selected— same as all, but `seasons` already contains only the chosen ones
+      selected -  same as all, but `seasons` already contains only the chosen ones
     """
     today = _TODAY()
     cutoff = since or today
@@ -123,7 +123,7 @@ def run_series_check() -> None:
             db.update_monitored_series(series["id"])
             continue
 
-        # Detect new seasons via TMDB. For 'selected' mode we never auto-expand —
+        # Detect new seasons via TMDB. For 'selected' mode we never auto-expand  - 
         # the user picked specific seasons. For 'all' and 'future' we pick up new
         # seasons as they're announced.
         if monitor_mode != "selected":
@@ -140,7 +140,7 @@ def run_series_check() -> None:
         _sync_wanted(imdb_id, tmdb_id, title, seasons, monitor_mode=monitor_mode, since=since)
         db.update_monitored_series(series["id"])
 
-    # Retry wanted episodes — keep watching indefinitely (like Radarr/Sonarr).
+    # Retry wanted episodes  -  keep watching indefinitely (like Radarr/Sonarr).
     # In catbox mode no TorBox quota is consumed so we never pause for budget.
     import processor
     catbox_mode = _settings.get("CATBOX_MODE", False)
@@ -156,17 +156,17 @@ def run_series_check() -> None:
         if not catbox_mode:
             usage = torbox.createtorrent_usage()
             if usage["count"] >= torbox._CREATETORRENT_LIMIT_HOUR - 2:
-                log.info("Monitor: createtorrent budget low (%d/%d) — pausing episode retries",
+                log.info("Monitor: createtorrent budget low (%d/%d)  -  pausing episode retries",
                          usage["count"], torbox._CREATETORRENT_LIMIT_HOUR)
                 break
         try:
             _retry_episode(ep)
         except processor.RateLimited:
             if catbox_mode:
-                log.info("Monitor: checkcached rate limited — waiting 60s then continuing")
+                log.info("Monitor: checkcached rate limited  -  waiting 60s then continuing")
                 import time; time.sleep(60)
                 continue
-            log.info("Monitor: rate limited — pausing episode retries until next run")
+            log.info("Monitor: rate limited  -  pausing episode retries until next run")
             break
 
     log.info("Monitor: series check complete")
@@ -185,7 +185,7 @@ def run_series_backfill() -> dict:
             "skipped": result.get("skipped", 0),
             "errors": result.get("errors", 0),
         }
-        log.info("run_series_backfill: sonarr import done — %s", summary["import"])
+        log.info("run_series_backfill: sonarr import done  -  %s", summary["import"])
     except Exception as exc:
         log.error("run_series_backfill: sonarr import failed: %s", exc)
         summary["import"] = {"error": str(exc)}
@@ -220,12 +220,12 @@ def _retry_episode(ep: dict) -> bool:
         return False
 
     # In catbox mode: write a lazy .strm for the best cached release.
-    # TorBox add is deferred until first playback — no quota consumed here.
+    # TorBox add is deferred until first playback  -  no quota consumed here.
     if _settings.get("CATBOX_MODE", False):
         cached_hashes = torbox.check_cached([s.info_hash for s in candidates])
         best = next((s for s in candidates if s.info_hash in cached_hashes), None)
         if not best:
-            log.info("Monitor: no cached release for %s S%02dE%02d — still wanted",
+            log.info("Monitor: no cached release for %s S%02dE%02d  -  still wanted",
                      title, season, episode)
             return False
         import strm_generator
@@ -262,7 +262,7 @@ def _retry_episode(ep: dict) -> bool:
                 raise processor.RateLimited()
             log.warning("Monitor: failed to add %s S%02dE%02d: %s", title, season, episode, exc)
 
-    # TorBox couldn't serve it — try RealDebrid (no createtorrent limit).
+    # TorBox couldn't serve it  -  try RealDebrid (no createtorrent limit).
     rd_winner = processor._try_realdebrid_fallback(
         title, candidates, media_type="episode", season=season, episode=episode,
     )

@@ -133,7 +133,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     }
   }, [status?.status])
 
-  // Reload Hls.js (or native video) with a new source URL — used after seek restart.
+  // Reload Hls.js (or native video) with a new source URL  -  used after seek restart.
   const reloadHls = useCallback((url: string) => {
     const video = videoRef.current
     if (!video) return
@@ -183,7 +183,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
     fetch(subtitleUrl)
       .then(r => r.text())
       .then(vtt => {
-        // addTextTrack creates a live, writable TextTrack — works with HLS.js
+        // addTextTrack creates a live, writable TextTrack  -  works with HLS.js
         const tt = video.addTextTrack('subtitles', 'external', 'und')
         tt.mode = 'showing'
 
@@ -223,7 +223,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
       .catch(err => console.warn('subtitle load failed', err))
   }, [subtitleUrl])
 
-  // Derived after status is declared — info_hash is segment [2] of /stream/<hash>/hls/...
+  // Derived after status is declared  -  info_hash is segment [2] of /stream/<hash>/hls/...
   const sessionKey = status?.stream_url?.split('/')[2] ?? null
 
   const stepIndex = STEPS.indexOf((status?.status ?? 'searching') as any)
@@ -303,7 +303,7 @@ export default function PlayerModal({ imdb_id, media_type, title, season, episod
                   >
                     {fileInfo.audio_tracks.map((t, i) => (
                       <option key={i} value={i}>
-                        🎵 {t.language.toUpperCase()}{t.title ? ` — ${t.title}` : ''}
+                        🎵 {t.language.toUpperCase()}{t.title ? `  -  ${t.title}` : ''}
                       </option>
                     ))}
                   </select>

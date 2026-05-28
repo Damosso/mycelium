@@ -10,7 +10,7 @@ PLUGIN_META = {
     "description": "Sync watchlist with Trakt.tv and scrobble watch history",
     "user_fields": [],
     # settings_ui drives the generic PluginSettingsCard renderer in the frontend.
-    # No frontend code changes needed when adding a new plugin — just define this.
+    # No frontend code changes needed when adding a new plugin  -  just define this.
     "settings_ui": {
         "status_url": "/ui/api/trakt/status",
         # config_gate: show a warning if this field is falsy in the status response
@@ -21,7 +21,7 @@ PLUGIN_META = {
             "link":    "https://trakt.tv/oauth/applications",
             "link_label": "trakt.tv/oauth/applications",
         },
-        # oauth_device: standard device-auth flow — frontend handles all states
+        # oauth_device: standard device-auth flow  -  frontend handles all states
         "oauth_device": {
             "connected_field": "connected",
             "username_field":  "username",

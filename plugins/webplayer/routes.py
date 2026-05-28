@@ -115,7 +115,7 @@ def stream_save_position(token: str):
 
 _INSTALLER_SCRIPT = r"""#!/usr/bin/env bash
 # Mycelium native player installer for macOS
-# Registers the mycelium:// URL scheme — opens streams in IINA, mpv, or VLC.
+# Registers the mycelium:// URL scheme  -  opens streams in IINA, mpv, or VLC.
 set -euo pipefail
 
 APP_NAME="MyceliumPlayer"

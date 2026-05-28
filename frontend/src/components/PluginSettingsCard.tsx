@@ -1,7 +1,7 @@
 /**
  * Generic renderer for plugin settings UI descriptors.
  * Plugins declare their settings in PLUGIN_META["settings_ui"] (Python).
- * No frontend changes needed when adding a new plugin — just define the descriptor.
+ * No frontend changes needed when adding a new plugin  -  just define the descriptor.
  */
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'

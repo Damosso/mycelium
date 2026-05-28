@@ -320,6 +320,20 @@
       .modal-hero { flex-direction: column; }
       .modal-poster { width: 140px; flex: 0 0 140px; margin: 0 auto; }
     }
+    .release-list { display: flex; flex-direction: column; gap: 8px; max-width: 680px; }
+    .release-entry { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .release-summary { display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+      cursor: pointer; list-style: none; user-select: none; }
+    .release-summary::-webkit-details-marker { display: none; }
+    .release-summary::before { content: '▶'; font-size: 10px; color: var(--muted);
+      transition: transform .15s; flex-shrink: 0; }
+    details[open] .release-summary::before { transform: rotate(90deg); }
+    .release-version { font-weight: 700; font-size: 14px; color: var(--text-bright); }
+    .release-date { font-size: 12px; margin-left: auto; }
+    .badge-current { font-size: 10px; font-weight: 700; padding: 2px 8px;
+      border-radius: 9999px; background: var(--accent); color: #fff; letter-spacing: .04em; }
+    .release-notes { margin: 0; padding: 0 16px 14px 36px; list-style: disc;
+      font-size: 13px; line-height: 1.7; color: var(--text); }
   </style>
 </head>
 <body>
@@ -367,6 +381,7 @@
     <button class="tab-btn" data-tab="settings">Settings</button>
     <button class="tab-btn" data-tab="users">Users</button>
     <button class="tab-btn" data-tab="logs">Logs</button>
+    <button class="tab-btn" data-tab="releases">Releases</button>
   </div>
 
   <!-- ── Overview ── -->
@@ -530,6 +545,10 @@
               <button class="btn btn-secondary btn-sm">Merge series</button>
             </form>
             <span class="dim">Combine duplicate series folders</span>
+          </div>
+          <div class="maint-item">
+            <button class="btn btn-secondary btn-sm" onclick="fixImdbTitles(this)">Fix IMDB titles</button>
+            <span class="dim">Rename items still using tt-codes as title</span>
           </div>
         </div>
       </div>
@@ -713,6 +732,30 @@
           <tbody><tr><td colspan="7" class="dim">Loading...</td></tr></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Releases ── -->
+  <div id="tab-releases" class="tab-pane">
+    <div class="section-header">
+      <span class="section-title">Releases</span>
+      <span class="dim" style="font-size:12px">Huidige versie: <strong>{{ app_version }}</strong></span>
+    </div>
+    <div class="release-list">
+      {% for rel in releases %}
+      <details {% if loop.first %}open{% endif %} class="release-entry">
+        <summary class="release-summary">
+          <span class="release-version">v{{ rel.version }}</span>
+          <span class="release-date dim">{{ rel.date }}</span>
+          {% if loop.first %}<span class="badge-current">huidig</span>{% endif %}
+        </summary>
+        <ul class="release-notes">
+          {% for note in rel.notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
     </div>
   </div>
 
@@ -1531,6 +1574,27 @@
       await fetch('/ui/strm-rescan', { method: 'POST' });
       toast('strm rescan', 'Started  -  check Logs', 'ok');
     } catch(e) { toast('Rescan failed', e.message, 'err'); }
+  }
+
+  async function fixImdbTitles(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    try {
+      const r = await fetch('/ui/api/fix-imdb-titles', { method: 'POST' });
+      const d = await r.json();
+      if (d.total === 0) {
+        toast('Fix IMDB titles', 'No items with IMDB-code titles found', 'ok');
+      } else {
+        const msg = `Fixed ${d.fixed_count}/${d.total}` +
+          (d.failed.length ? `  -  ${d.failed.length} failed` : '');
+        toast('Fix IMDB titles', msg, d.failed.length ? 'warn' : 'ok');
+      }
+    } catch(e) {
+      toast('Fix IMDB titles failed', e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Fix IMDB titles';
+    }
   }
 
   // ── Logs ──

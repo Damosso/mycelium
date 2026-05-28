@@ -24,7 +24,7 @@ export default function SubtitlePicker({ token, onSelect }: {
       <option value="">💬 Geen ondertitels</option>
       {subs.map(s => (
         <option key={s.url} value={s.url}>
-          💬 {s.language.toUpperCase()}{s.label ? ` — ${s.label}` : ''}
+          💬 {s.language.toUpperCase()}{s.label ? `  -  ${s.label}` : ''}
         </option>
       ))}
     </select>

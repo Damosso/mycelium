@@ -15,7 +15,7 @@ import db
 
 log = logging.getLogger(__name__)
 
-# Type hints per key — drives parsing of stored strings.
+# Type hints per key  -  drives parsing of stored strings.
 _BOOL_KEYS = {
     "CATBOX_MODE",
     "CATBOX_PRELOAD",

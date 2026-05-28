@@ -1,5 +1,5 @@
 """
-Plugin loader — scans plugins/ at startup and registers Flask blueprints.
+Plugin loader  -  scans plugins/ at startup and registers Flask blueprints.
 
 Plugin structure:
     plugins/

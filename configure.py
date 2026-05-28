@@ -2,7 +2,7 @@
 """Set Mycelium runtime settings from the command line.
 
 Runtime settings live in the SQLite `settings` table (overriding .env). This
-helper lets you set them without clicking through the Settings tab — handy for
+helper lets you set them without clicking through the Settings tab  -  handy for
 scripting a fresh deploy.
 
 Usage:
@@ -27,17 +27,17 @@ import sys
 import db
 import settings
 
-db.init()  # idempotent — ensures the settings table exists when run standalone
+db.init()  # idempotent  -  ensures the settings table exists when run standalone
 
 # Recommended defaults for a large library with TorBox + RealDebrid, lazy
-# materialization and no idle eviction. Keys are NOT included — pass those
+# materialization and no idle eviction. Keys are NOT included  -  pass those
 # inline on the command line.
 RECOMMENDED = {
     "MULTI_DEBRID_ENABLED": "true",
     "ZILEAN_ENABLED": "true",
     "CATBOX_MODE": "true",
     "CATBOX_LAZY_ADD": "true",
-    "CATBOX_IDLE_MINUTES": "43200",  # 30 days — no eviction within TorBox retention
+    "CATBOX_IDLE_MINUTES": "43200",  # 30 days  -  no eviction within TorBox retention
     "TORRENTIO_BASE_URL":
         "https://torrentio.strem.fun/qualityfilter=brremux,threed,other,480p,scr,cam,unknown",
 }

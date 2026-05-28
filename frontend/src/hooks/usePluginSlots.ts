@@ -15,7 +15,7 @@
  */
 import type React from 'react'
 
-// Vite resolves this glob at build time — only installed plugins appear here.
+// Vite resolves this glob at build time  -  only installed plugins appear here.
 // Pattern is relative to this file: ../plugins/ = frontend/src/plugins/
 const _entries = import.meta.glob<{
   slots?: Record<string, React.ComponentType<any>>

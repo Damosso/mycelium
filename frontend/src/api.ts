@@ -242,7 +242,7 @@ export const api = {
     ),
 };
 
-// Image helpers — TMDB image CDN
+// Image helpers  -  TMDB image CDN
 export const tmdbImg = {
   poster: (p: string | null | undefined) => (p ? `https://image.tmdb.org/t/p/w342${p}` : null),
   backdrop: (p: string | null | undefined) => (p ? `https://image.tmdb.org/t/p/w1280${p}` : null),
@@ -250,7 +250,7 @@ export const tmdbImg = {
   profile: (p: string | null | undefined) => (p ? `https://image.tmdb.org/t/p/w185${p}` : null),
 };
 
-// Provider IDs (NL) — keep in sync with backend tmdb.NL_PROVIDERS
+// Provider IDs (NL)  -  keep in sync with backend tmdb.NL_PROVIDERS
 export const NL_PROVIDER_IDS = {
   netflix: 8,
   amazon_prime: 119,

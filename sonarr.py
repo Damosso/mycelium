@@ -1,4 +1,4 @@
-"""Sonarr API client — pull all series from an existing Sonarr instance."""
+"""Sonarr API client  -  pull all series from an existing Sonarr instance."""
 import logging
 
 import requests

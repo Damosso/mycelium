@@ -27,7 +27,7 @@ from config import CATBOX_HOST, CATBOX_IDLE_MINUTES
 log = logging.getLogger(__name__)
 
 
-_URL_CACHE_TTL_SEC = 82800  # 23 hours — within TorBox CDN URL 24h validity
+_URL_CACHE_TTL_SEC = 82800  # 23 hours  -  within TorBox CDN URL 24h validity
 ON_PLAY_READY_TIMEOUT_SEC = 45  # max wait on-play before giving up (cached = seconds)
 _url_cache: dict[str, tuple[str, float]] = {}
 _url_cache_lock = threading.Lock()
@@ -36,7 +36,7 @@ _url_cache_lock = threading.Lock()
 # block retries for a short window so Jellyfin's burst of probe requests doesn't
 # hammer TorBox with repeated createtorrent calls.
 _FAIL_COOLDOWN_SEC = 30        # standard failure (readd blocked, no file)
-_FAIL_COOLDOWN_429_SEC = 120   # TorBox 429 — back off longer
+_FAIL_COOLDOWN_429_SEC = 120   # TorBox 429  -  back off longer
 _fail_cache: dict[str, float] = {}  # token → expiry monotonic timestamp
 _fail_cache_lock = threading.Lock()
 
@@ -73,14 +73,14 @@ _token_locks: dict[str, threading.Lock] = {}
 _search_cache: dict[tuple, tuple[float, object]] = {}  # key → (expiry, result)
 _search_cache_lock = threading.Lock()
 _SEARCH_HIT_TTL    = 300    # 5 min: re-check soon if a cached release was found
-_SEARCH_MISS_TTL   = 21600  # 6 h:  nothing cached — back off (matches _fail_put below)
+_SEARCH_MISS_TTL   = 21600  # 6 h:  nothing cached  -  back off (matches _fail_put below)
 _token_locks_lock = threading.Lock()
 
 # ── scan/probe burst detection ────────────────────────────────────────────────
 # A media-server library scan opens many DISTINCT .strm URLs in a short burst,
 # whereas real playback touches a single token (plus seeks on that same token).
 # When we see a burst of distinct tokens we treat the requests as scan probes and
-# refuse to re-add idle-released torrents — re-materializing the whole library on
+# refuse to re-add idle-released torrents  -  re-materializing the whole library on
 # every scan is slow and churns TorBox's createtorrent quota. Items already live
 # in TorBox still resolve cheaply (mylist is cached), so they probe fine.
 _SCAN_WINDOW_SEC = 25
@@ -186,7 +186,7 @@ def materialize(token: str, allow_readd: bool | None = None) -> str | None:
         db.touch_virtual_item(token)
         return cached
 
-    # Respect failure cooldown — don't spam TorBox after a recent failed attempt.
+    # Respect failure cooldown  -  don't spam TorBox after a recent failed attempt.
     if _fail_get(token):
         return None
 
@@ -256,7 +256,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                         db.update_playability_ok(ckey, "realdebrid")
                     _metrics_inc("ok" if not rematerialized else "rematerialized")
                     return url
-            log.info("Catbox/RD: %s no longer in RD library — will re-add", item["title"])
+            log.info("Catbox/RD: %s no longer in RD library  -  will re-add", item["title"])
             db.update_virtual_rd_id(token, None)
             rd_id = None
             rematerialized = True
@@ -274,9 +274,9 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 db.update_playability_fail(ckey, REASON_SEARCH_ERROR)
             return None
         if not fresh:
-            log.error("Catbox/RD: no cached release for %s — keeping .strm, retry in 6h",
+            log.error("Catbox/RD: no cached release for %s  -  keeping .strm, retry in 6h",
                       item["title"])
-            _fail_put(token, 21600)  # 6h — repair job will clean up if truly dead
+            _fail_put(token, 21600)  # 6h  -  repair job will clean up if truly dead
             if ckey:
                 db.update_playability_fail(ckey, REASON_NO_CACHED)
             return None
@@ -285,7 +285,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         db.update_virtual_item_upgrade(token, new_hash, new_magnet, None, None)
         db.update_virtual_debrid_provider(token, provider)
         if provider == "torbox":
-            # Search found TorBox — fall through to TorBox block below
+            # Search found TorBox  -  fall through to TorBox block below
             debrid_provider = "torbox"
             item["debrid_provider"] = "torbox"
             item["info_hash"] = new_hash
@@ -333,10 +333,10 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         if existing and torbox._is_ready(existing):
             torbox_id = existing["id"]
             db.update_virtual_torbox_id(token, torbox_id)
-            log.info("Catbox: %s still in library (id=%s) — no re-add needed",
+            log.info("Catbox: %s still in library (id=%s)  -  no re-add needed",
                      item["title"], torbox_id)
 
-    # Third chance: use the stored magnet to add directly — covers both items that
+    # Third chance: use the stored magnet to add directly  -  covers both items that
     # previously had a torbox_id (fell out of mylist top-1000) and freshly lazy-
     # registered items (torbox_id=NULL, magnet already selected at request time).
     if not torbox_id and item.get("magnet") and allow_readd:
@@ -361,7 +361,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                                or "429" in exc_str or "403" in exc_str)
             log.warning("Catbox: stored-magnet re-add failed for %s: %s", item["title"], exc)
             if is_rate_limited:
-                # 429 = rate limited; 403 = API key/plan issue — either way
+                # 429 = rate limited; 403 = API key/plan issue  -  either way
                 # there is no point continuing to checkcached, it will also fail.
                 _fail_put(token, _FAIL_COOLDOWN_429_SEC)
                 if ckey:
@@ -377,7 +377,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 known_hash = item["info_hash"].lower()
                 rd_instant = _rd.check_cached([known_hash])
                 if known_hash in {h.lower() for h in rd_instant}:
-                    log.info("Catbox: known hash cached on RD for %s — switching to RD path",
+                    log.info("Catbox: known hash cached on RD for %s  -  switching to RD path",
                              item["title"])
                     db.update_virtual_debrid_provider(token, "realdebrid")
                     magnet = item.get("magnet") or f"magnet:?xt=urn:btih:{known_hash}"
@@ -415,9 +415,9 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 db.update_playability_fail(ckey, REASON_SEARCH_ERROR)
             return None
         if not fresh:
-            log.error("Catbox: no cached release found for %s — keeping .strm, retry in 6h",
+            log.error("Catbox: no cached release found for %s  -  keeping .strm, retry in 6h",
                       item["title"])
-            _fail_put(token, 21600)  # 6h — repair job will clean up if truly dead
+            _fail_put(token, 21600)  # 6h  -  repair job will clean up if truly dead
             if ckey:
                 db.update_playability_fail(ckey, REASON_NO_CACHED)
             return None
@@ -425,7 +425,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
         new_hash, new_magnet, provider = fresh
         db.update_virtual_debrid_provider(token, provider)
         if provider == "realdebrid":
-            # Search found RD — switch provider and handle via RD
+            # Search found RD  -  switch provider and handle via RD
             import realdebrid as _rd
             db.update_virtual_item_upgrade(token, new_hash, new_magnet, None, None)
             try:
@@ -472,7 +472,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 live = torbox.wait_until_ready(
                     new_hash, timeout=ON_PLAY_READY_TIMEOUT_SEC, torrent_id=_tid or None)
             if not live:
-                log.error("Catbox: fresh release not ready for %s — keeping .strm, retry soon",
+                log.error("Catbox: fresh release not ready for %s  -  keeping .strm, retry soon",
                           item["title"])
                 _fail_put(token, _FAIL_COOLDOWN_SEC)
                 if ckey:
@@ -502,8 +502,8 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                 elif not (live.get("files")):
                     # TorBox returned the torrent without a files list (common for the
                     # ?id= single-item endpoint).  Use file_id=0 which tells TorBox to
-                    # serve the largest file automatically — works for single-file movies.
-                    log.info("Catbox: no files list for %s — using file_id=0 (auto)", item["title"])
+                    # serve the largest file automatically  -  works for single-file movies.
+                    log.info("Catbox: no files list for %s  -  using file_id=0 (auto)", item["title"])
                     file_id = 0
             else:
                 videos = [f for f in (live.get("files") or [])
@@ -524,7 +524,7 @@ def _materialize_locked(token: str, allow_readd: bool = True) -> str | None:
                     db.update_virtual_file_id(token, file_id)
 
     if file_id is None or (not file_id and file_id != 0):
-        log.error("Catbox: no playable file found for %s — keeping .strm, retry later", token)
+        log.error("Catbox: no playable file found for %s  -  keeping .strm, retry later", token)
         _fail_put(token, _FAIL_COOLDOWN_SEC)
         if ckey:
             db.update_playability_fail(ckey, REASON_NO_FILE)
@@ -584,7 +584,7 @@ def _search_cached_release(item: dict) -> object:
         entry = _search_cache.get(key)
         if entry and entry[0] > now:
             result = entry[1]
-            log.debug("Catbox search cache hit for %s %s — skipping Zilean/Torrentio",
+            log.debug("Catbox search cache hit for %s %s  -  skipping Zilean/Torrentio",
                       imdb_id, key[1:])
             return result
     result = _search_best_cached_release(item)
@@ -598,9 +598,9 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
     """Search Torrentio for the best currently-cached release for this item.
 
     Returns:
-      (info_hash, magnet)  — found a cached release
-      None                 — searched OK, nothing cached right now
-      _SEARCH_UNAVAILABLE  — couldn't search (no imdb_id, network error) — do NOT remove .strm
+      (info_hash, magnet)   -  found a cached release
+      None                  -  searched OK, nothing cached right now
+      _SEARCH_UNAVAILABLE   -  couldn't search (no imdb_id, network error)  -  do NOT remove .strm
     """
     imdb_id = item.get("imdb_id")
     if not imdb_id:
@@ -623,7 +623,7 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
         except Exception as exc:
             log.warning("Catbox search: TMDB lookup failed for %s: %s", item.get("title"), exc)
     if not imdb_id:
-        log.warning("Catbox search: no imdb_id for %s — keeping .strm, will retry later",
+        log.warning("Catbox search: no imdb_id for %s  -  keeping .strm, will retry later",
                     item["title"])
         return _SEARCH_UNAVAILABLE
     try:
@@ -684,7 +684,7 @@ def _search_best_cached_release(item: dict) -> tuple[str, str] | None | object:
                 return s.info_hash.lower(), s.magnet, "torbox"
         return None
     except Exception as exc:
-        log.warning("Catbox search: failed for %s: %s — keeping .strm", item["title"], exc)
+        log.warning("Catbox search: failed for %s: %s  -  keeping .strm", item["title"], exc)
         return _SEARCH_UNAVAILABLE
 
 

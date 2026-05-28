@@ -1,4 +1,4 @@
-"""Trakt.tv API wrapper — device auth, token management, watchlist sync, scrobble."""
+"""Trakt.tv API wrapper  -  device auth, token management, watchlist sync, scrobble."""
 from __future__ import annotations
 
 import logging
@@ -307,7 +307,7 @@ def sync_all_users() -> None:
             tok = refresh_if_needed(tok)
             wl = sync_user_watchlist(tok["user_id"], tok["access_token"])
             watched = sync_user_watched(tok["user_id"], tok["access_token"])
-            log.info("Trakt sync: user %d — %d watchlist, %d watched", tok["user_id"], wl, watched)
+            log.info("Trakt sync: user %d  -  %d watchlist, %d watched", tok["user_id"], wl, watched)
         except Exception as exc:
             log.warning("Trakt sync failed for user %d: %s", tok["user_id"], exc)
 

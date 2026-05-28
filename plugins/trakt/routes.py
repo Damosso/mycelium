@@ -37,7 +37,7 @@ def trakt_status():
 @bp.post("/ui/api/trakt/auth/start")
 def trakt_auth_start():
     if not settings.get("TRAKT_CLIENT_ID"):
-        return jsonify(error="TRAKT_CLIENT_ID not configured — set it via admin settings"), 400
+        return jsonify(error="TRAKT_CLIENT_ID not configured  -  set it via admin settings"), 400
     rec = _require_user()
     user_id = rec.get("id")
     if not user_id:

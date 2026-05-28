@@ -37,7 +37,7 @@ def run_due() -> int:
 
     usage = torbox.createtorrent_usage()
     if usage["count"] >= torbox._CREATETORRENT_LIMIT - 2:
-        log.info("Retry: skipping this cycle — createtorrent budget %d/%d (resets ~%dm)",
+        log.info("Retry: skipping this cycle  -  createtorrent budget %d/%d (resets ~%dm)",
                  usage["count"], torbox._CREATETORRENT_LIMIT,
                  max(1, usage["resets_in_sec"] // 60))
         return 0
@@ -48,7 +48,7 @@ def run_due() -> int:
     for row in due:
         # Re-check budget before each item; bail out (leave the rest queued) when low.
         if torbox.createtorrent_usage()["count"] >= torbox._CREATETORRENT_LIMIT - 2:
-            log.info("Retry: budget reached after %d item(s) — leaving %d for next cycle",
+            log.info("Retry: budget reached after %d item(s)  -  leaving %d for next cycle",
                      processed, len(due) - processed)
             break
         seasons = [int(s) for s in (row.get("seasons") or "").split(",") if s.strip().isdigit()]

@@ -250,6 +250,22 @@ def load(token: str) -> dict | None:
         return None
 
 
+def extract_codec_private(token: str) -> bytes | None:
+    """Extract HEVC (hvcC) or AVC (avcC) decoder config bytes from the cached moov.
+    Returns the box payload (without 8-byte header), or None if not found."""
+    info = load(token)
+    if not info:
+        return None
+    moov = info["header"][info["ftyp_size"]:]
+    for tag in (b"hvcC", b"avcC"):
+        i = moov.find(tag)
+        if i >= 4:
+            sz = struct.unpack_from(">I", moov, i - 4)[0]
+            if 8 <= sz <= len(moov) - (i - 4):
+                return bytes(moov[i + 4 : i - 4 + sz])
+    return None
+
+
 # ── Virtual offset mapping ────────────────────────────────────────────────────
 
 def virtual_to_cdn(virtual_offset: int, info: dict) -> int | None:

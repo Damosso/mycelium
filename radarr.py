@@ -1,4 +1,4 @@
-"""Radarr API client — pull all movies from an existing Radarr instance."""
+"""Radarr API client  -  pull all movies from an existing Radarr instance."""
 import logging
 
 import requests

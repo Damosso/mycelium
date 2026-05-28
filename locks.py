@@ -37,7 +37,7 @@ class imdb_mutex:
         else:
             self.held = self.lock.acquire(blocking=self.blocking)
         if not self.held:
-            log.warning("imdb mutex busy for %s — another worker holds it", self.key)
+            log.warning("imdb mutex busy for %s  -  another worker holds it", self.key)
         return self.held
 
     def __exit__(self, *exc) -> None:

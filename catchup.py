@@ -22,7 +22,7 @@ def _build_request(item: dict) -> MediaRequest | None:
     elif raw_type in ("tv", "series"):
         media_type = "series"
     else:
-        log.debug("Catch-up: skipping request %s — unknown media type %r", item.get("id"), raw_type)
+        log.debug("Catch-up: skipping request %s  -  unknown media type %r", item.get("id"), raw_type)
         return None
 
     imdb_id = media.get("imdbId") or media.get("imdb_id") or None
@@ -31,7 +31,7 @@ def _build_request(item: dict) -> MediaRequest | None:
         if tmdb_id:
             imdb_id = tmdb.tmdb_to_imdb(tmdb_id, media_type=raw_type if raw_type in ("movie", "tv") else "movie")
     if not imdb_id:
-        log.debug("Catch-up: skipping request %s — no IMDB ID (tmdbId=%s)", item.get("id"), media.get("tmdbId"))
+        log.debug("Catch-up: skipping request %s  -  no IMDB ID (tmdbId=%s)", item.get("id"), media.get("tmdbId"))
         return None
 
     title = media.get("title") or str(imdb_id)
@@ -50,7 +50,7 @@ def _build_request(item: dict) -> MediaRequest | None:
 
 def run() -> None:
     if not seerr.is_configured():
-        log.info("Catch-up: skipped (SEERR_URL not configured — using SPA discovery instead)")
+        log.info("Catch-up: skipped (SEERR_URL not configured  -  using SPA discovery instead)")
         return
     log.info("Catch-up: fetching up to %d approved requests from Seerr", CATCHUP_TAKE)
     try:
@@ -78,7 +78,7 @@ def run() -> None:
         if req is None:
             continue
         if _in_torbox(req.title):
-            log.info("Catch-up: '%s' already in TorBox — skipping", req.title)
+            log.info("Catch-up: '%s' already in TorBox  -  skipping", req.title)
             continue
         log.info("Catch-up: processing missed request '%s' (%s)", req.title, req.imdb_id)
         try:

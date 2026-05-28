@@ -64,7 +64,7 @@ def deadman_check() -> None:
     _warn(
         "deadman",
         "Deadman: no activity",
-        f"No successful add in the last {age:.1f} hours — scheduler stuck or services unreachable?",
+        f"No successful add in the last {age:.1f} hours  -  scheduler stuck or services unreachable?",
     )
 
 

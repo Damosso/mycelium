@@ -1,6 +1,6 @@
 """Library synchronisation between disk and DB.
 
-orphans(): returns counts of inconsistencies — strm-without-DB and DB-without-strm.
+orphans(): returns counts of inconsistencies  -  strm-without-DB and DB-without-strm.
 import_existing(): walk the media folder and insert any .strm files that have no
 corresponding media_items entry, so DB-loss recoveries can be self-healing.
 """
@@ -303,7 +303,7 @@ def _norm(s: str) -> str:
     s = re.sub(r'\([^)]*[Ѐ-ӿ][^)]*\)', '', s).strip()
     # Strip year in parens at end
     s = re.sub(r'\s*\(\d{4}\)\s*$', '', s).strip()
-    # Strip all remaining parenthesised content — in folder names this is always
+    # Strip all remaining parenthesised content  -  in folder names this is always
     # torrent metadata (director name, translator, etc.), never part of the actual title
     s = re.sub(r'\([^)]*\)', '', s).strip()
     # Strip trailing open bracket (malformed names like "Absolution (")
@@ -323,7 +323,7 @@ _SCORE_SITE_RE = re.compile(
 
 
 def _folder_score(name: str) -> int:
-    """Score a folder name — higher = better (prefer clean TMDB-style names)."""
+    """Score a folder name  -  higher = better (prefer clean TMDB-style names)."""
     score = 0
     # Heavy penalty for known torrent-site prefixes embedded in the name
     if _SCORE_SITE_RE.search(name):
@@ -332,7 +332,7 @@ def _folder_score(name: str) -> int:
         score += 100
     if not re.search(r'[\[\]\{\}]', name):    # no square/curly brackets
         score += 50
-    if re.search(r'\(\d{4}\)$', name):        # ends with (year) — proper TMDB format
+    if re.search(r'\(\d{4}\)$', name):        # ends with (year)  -  proper TMDB format
         score += 30
     if not re.search(r'[Ѐ-ӿ]', name):        # no Cyrillic
         score += 20

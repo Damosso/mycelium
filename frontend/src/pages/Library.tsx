@@ -260,7 +260,7 @@ function SeriesPanel() {
                                       ? 'bg-green-500/20 text-green-400 hover:bg-green-600 hover:text-white'
                                       : 'bg-accent/20 text-accent hover:bg-indigo-600 hover:text-white'
                                     }`}
-                                  title={isWatched ? 'Watched — play again' : 'Play in browser'}
+                                  title={isWatched ? 'Watched  -  play again' : 'Play in browser'}
                                 >
                                   ▶ {label}
                                 </button>

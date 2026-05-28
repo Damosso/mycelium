@@ -89,7 +89,7 @@ function FailedRequestsPanel() {
     <section>
       <h2 className="text-lg font-bold mb-3 text-red-400">Failed requests</h2>
       <p className="text-muted text-xs mb-3">
-        These requests failed to find a stream. The system retries automatically — you can also retry manually.
+        These requests failed to find a stream. The system retries automatically  -  you can also retry manually.
       </p>
       <table className="w-full text-sm">
         <thead className="text-xs text-muted uppercase border-b border-border">
@@ -107,7 +107,7 @@ function FailedRequestsPanel() {
               <td className="py-2 px-3 font-medium">{r.title}</td>
               <td className="py-2 px-3 text-muted">{r.media_type}</td>
               <td className="py-2 px-3 text-red-400 text-xs max-w-xs truncate" title={r.error || ''}>
-                {r.error || '—'}
+                {r.error || ' - '}
               </td>
               <td className="py-2 px-3 text-muted text-xs">{r.updated_at}</td>
               <td className="py-2 px-3 text-right">

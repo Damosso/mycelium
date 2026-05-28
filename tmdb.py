@@ -315,7 +315,7 @@ def details(media_type: str, tmdb_id: int, region: str = "NL") -> dict | None:
     return item
 
 
-# Common Dutch / European providers — IDs from TMDB
+# Common Dutch / European providers  -  IDs from TMDB
 NL_PROVIDERS = {
     "netflix": 8,
     "amazon_prime": 119,

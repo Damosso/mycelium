@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 # into the requests.error column so the UI can show why something failed.
 _LAST_FAIL_REASON: dict[str, str] = {}
 
-# imdb_ids that failed because no acceptable-quality release exists yet — these
+# imdb_ids that failed because no acceptable-quality release exists yet  -  these
 # go to the wanted_movies list and are rechecked periodically rather than
 # being marked permanently failed.
 _WANTED: dict[str, str] = {}
@@ -88,12 +88,12 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
     """Add a single magnet to TorBox. Raises RateLimited (without blacklisting)
     when the hourly createtorrent budget is gone, so the request is rescheduled
     rather than wasting the quota or marking a good torrent bad. We do NOT retry
-    a 429 inline — the hourly window won't reset in seconds."""
-    # Skip createtorrent entirely if this hash is already in our TorBox library —
+    a 429 inline  -  the hourly window won't reset in seconds."""
+    # Skip createtorrent entirely if this hash is already in our TorBox library  - 
     # re-adding it would waste a 60/hour quota slot for content we already have.
     existing = torbox.find_by_hash(stream.info_hash)
     if existing and torbox._is_ready(existing):
-        log.info("Already in TorBox library (id=%s) — skipping createtorrent for %s",
+        log.info("Already in TorBox library (id=%s)  -  skipping createtorrent for %s",
                  existing.get("id"), label)
         return True
     try:
@@ -101,11 +101,11 @@ def _try_add_magnet(stream: TorrentioStream, label: str) -> bool:
         torbox.wait_until_ready(stream.info_hash)
         return True
     except torbox.RateLimited:
-        log.warning("createtorrent budget exhausted adding %s — will retry later", label)
+        log.warning("createtorrent budget exhausted adding %s  -  will retry later", label)
         raise RateLimited()
     except Exception as exc:
         if _is_429(exc):
-            log.warning("Rate limited (429) adding %s — will retry later", label)
+            log.warning("Rate limited (429) adding %s  -  will retry later", label)
             raise RateLimited()
         log.warning("Failed to add %s (hash=%s): %s", label, stream.info_hash, exc)
         blacklist.record_failure(stream.info_hash, str(exc)[:200])
@@ -131,10 +131,10 @@ def _add_best_from(candidates: list, label: str) -> tuple[bool, Optional[Torrent
     uncached = [s for s in candidates if s.info_hash not in cached_hashes]
 
     if cached:
-        log.info("%d/%d candidate(s) cached for %s — trying best cached", len(cached), len(candidates), label)
+        log.info("%d/%d candidate(s) cached for %s  -  trying best cached", len(cached), len(candidates), label)
         to_try = cached[:2]
     else:
-        log.info("No cached candidates for %s — trying best uncached", label)
+        log.info("No cached candidates for %s  -  trying best uncached", label)
         to_try = uncached[:2]
 
     for i, stream in enumerate(to_try):
@@ -142,7 +142,7 @@ def _add_best_from(candidates: list, label: str) -> tuple[bool, Optional[Torrent
             time.sleep(2)
         if _try_add_magnet(stream, label):
             return True, stream
-        log.warning("Candidate %d/%d failed for %s — %s", i + 1, len(to_try), label,
+        log.warning("Candidate %d/%d failed for %s  -  %s", i + 1, len(to_try), label,
                     "trying next" if i + 1 < len(to_try) else "giving up")
 
     log.error("All candidate(s) failed for %s", label)
@@ -160,7 +160,7 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
     cached_hashes = debrid.check_cached_multi([s.info_hash for s in candidates]).get("torbox", set())
     cached = [s for s in candidates if s.info_hash in cached_hashes]
     if not cached:
-        log.info("Lazy: no cached release for %s — will wait in wanted", req.title)
+        log.info("Lazy: no cached release for %s  -  will wait in wanted", req.title)
         return None
     winner = cached[0]
     year = strm_generator._extract_year(winner.name) or strm_generator._extract_year(winner.title)
@@ -178,11 +178,11 @@ def _lazy_register_movie(req: MediaRequest, candidates: list) -> Optional[Torren
         imdb_id=req.imdb_id, tmdb_id=getattr(req, 'tmdb_id', None),
         quality=winner.quality, source=winner.source, size_gb=winner.size_gb,
     ):
-        log.info("Lazy-registered movie %s (cached, %s) — createtorrent deferred to first play",
+        log.info("Lazy-registered movie %s (cached, %s)  -  createtorrent deferred to first play",
                  req.title, winner.quality)
         return winner
-    # strm already exists — still a success, don't mark as wanted
-    log.info("Lazy registration skipped for %s (strm already exists) — treating as success", req.title)
+    # strm already exists  -  still a success, don't mark as wanted
+    log.info("Lazy registration skipped for %s (strm already exists)  -  treating as success", req.title)
     return winner
 
 
@@ -192,22 +192,22 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
         # No usable release yet (nothing found, or only cam rejected by
         # STRICT_NO_CAM). Mark "wanted" so we keep watching for an acceptable
         # release instead of failing permanently.
-        reason = "no acceptable-quality release yet — watching for one"
-        log.info("No usable stream for movie %s (%s) — marking wanted", req.title, req.imdb_id)
+        reason = "no acceptable-quality release yet  -  watching for one"
+        log.info("No usable stream for movie %s (%s)  -  marking wanted", req.title, req.imdb_id)
         _LAST_FAIL_REASON[req.imdb_id] = reason
         _WANTED[req.imdb_id] = reason
         return False, None
     log.info("Trying %d candidate(s) for %s", len(candidates), req.title)
 
     # Lazy materialization: register without spending a createtorrent slot.
-    # In catbox mode we ONLY accept cached releases — uncached means we wait
+    # In catbox mode we ONLY accept cached releases  -  uncached means we wait
     # in wanted until TorBox has it cached, so playback is always instant.
     if _settings.get("CATBOX_MODE", False) and _settings.get("CATBOX_LAZY_ADD", False):
         winner = _lazy_register_movie(req, candidates)
         if winner:
             return True, winner
-        reason = "no cached release yet — waiting for TorBox to cache it"
-        log.info("Catbox: no cached release for %s — marking wanted", req.title)
+        reason = "no cached release yet  -  waiting for TorBox to cache it"
+        log.info("Catbox: no cached release for %s  -  marking wanted", req.title)
         _LAST_FAIL_REASON[req.imdb_id] = reason
         _WANTED[req.imdb_id] = reason
         return False, None
@@ -215,13 +215,13 @@ def _process_movie(req: MediaRequest) -> tuple[bool, Optional[TorrentioStream]]:
     try:
         ok, winner = _add_best_from(candidates, req.title)
     except RateLimited:
-        # TorBox quota gone — try RealDebrid (no createtorrent limit) before
+        # TorBox quota gone  -  try RealDebrid (no createtorrent limit) before
         # giving up, so we can still serve the title right now.
-        log.info("TorBox rate limited for %s — trying RealDebrid fallback first", req.title)
+        log.info("TorBox rate limited for %s  -  trying RealDebrid fallback first", req.title)
         fallback = _try_realdebrid_fallback(req.title, candidates)
         if fallback:
             return True, fallback
-        raise  # nothing on RD either — reschedule via retry queue
+        raise  # nothing on RD either  -  reschedule via retry queue
     if ok:
         return ok, winner
     # TorBox add failed (not rate limit). Try RD cached fallback.
@@ -257,7 +257,7 @@ def _try_realdebrid_fallback(title: str, candidates: list,
     if not rd_candidates:
         log.info("RD fallback: no candidates cached on RealDebrid for %s", title)
         return None
-    log.info("RD fallback (%s): %d cached on RD — trying best", media_type, len(rd_candidates))
+    log.info("RD fallback (%s): %d cached on RD  -  trying best", media_type, len(rd_candidates))
     for cand in rd_candidates[:2]:
         try:
             added = realdebrid.add_magnet(cand.magnet)
@@ -317,7 +317,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
     pack_candidates = _fetch_season_candidates(req, season, episode=1, prefer_season_pack=True)
     pack_candidates = blacklist.filter_candidates(pack_candidates)
     if not pack_candidates:
-        log.info("Lazy series: no candidates for %s S%02d — marking wanted", req.title, season)
+        log.info("Lazy series: no candidates for %s S%02d  -  marking wanted", req.title, season)
         return False, None
 
     hashes = [s.info_hash for s in pack_candidates]
@@ -352,7 +352,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
         return False, None
 
     # --- Fall back to per-episode cached registration ---
-    log.info("Lazy: no cached season pack for %s S%02d — trying per-episode", req.title, season)
+    log.info("Lazy: no cached season pack for %s S%02d  -  trying per-episode", req.title, season)
     added = 0
     first_winner: Optional[TorrentioStream] = None
     preload_done = False
@@ -371,7 +371,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
 
         if not ep_candidates:
             if episode == 1:
-                log.info("Lazy: no cached per-episode for %s S%02dE%02d — stopping", req.title, season, episode)
+                log.info("Lazy: no cached per-episode for %s S%02dE%02d  -  stopping", req.title, season, episode)
             break
 
         winner = ep_candidates[0]
@@ -396,7 +396,7 @@ def _lazy_register_season(req: MediaRequest, season: int) -> tuple[bool, Optiona
         log.info("Lazy per-episode: %d .strm(s) registered for %s S%02d", added, req.title, season)
         return True, first_winner
 
-    reason = "no cached episodes available yet — waiting for TorBox cache"
+    reason = "no cached episodes available yet  -  waiting for TorBox cache"
     log.info("Catbox: %s", reason)
     _LAST_FAIL_REASON[req.imdb_id] = reason
     _WANTED[req.imdb_id] = reason
@@ -421,7 +421,7 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
         try:
             ok, winner = _add_best_from(packs, f"{req.title} S{season:02d} pack")
         except RateLimited:
-            log.info("TorBox rate limited — trying RD pack fallback for %s S%02d", req.title, season)
+            log.info("TorBox rate limited  -  trying RD pack fallback for %s S%02d", req.title, season)
             rd_winner = _try_realdebrid_fallback(
                 f"{req.title} S{season:02d}", packs, media_type="series",
             )
@@ -452,7 +452,7 @@ def _process_season(req: MediaRequest, season: int) -> tuple[bool, Optional[Torr
         try:
             ok, winner = _add_best_from(candidates, f"{req.title} S{season:02d}E{episode:02d}")
         except RateLimited:
-            # TorBox quota gone mid-season — try RD for this episode, then stop
+            # TorBox quota gone mid-season  -  try RD for this episode, then stop
             # adding more (leave the rest for the retry queue) to respect quota.
             rd_winner = _try_realdebrid_fallback(
                 req.title, candidates,
@@ -518,13 +518,13 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
                     success = True
                     winner = winner or w
     except RateLimited:
-        # TorBox 429 — not a real failure. Reschedule and surface a clear status.
+        # TorBox 429  -  not a real failure. Reschedule and surface a clear status.
         _LAST_FAIL_REASON.pop(req.imdb_id, None)
         db.update_request(row_id, "rate_limited",
-                          error="TorBox rate limit (60/hour) hit — will retry automatically")
+                          error="TorBox rate limit (60/hour) hit  -  will retry automatically")
         import retry_queue
         retry_queue.schedule(req, _retry_attempt)
-        log.warning("Rate limited processing %s — rescheduled via retry queue", req.title)
+        log.warning("Rate limited processing %s  -  rescheduled via retry queue", req.title)
         db.record_metric("request_rate_limited", req.media_type, value_int=1)
         return False
     except Exception as exc:
@@ -598,7 +598,7 @@ def _process_locked(req: MediaRequest, _retry_attempt: int) -> bool:
         except Exception:
             tmdb_id = None
         db.upsert_wanted_movie(req.imdb_id, tmdb_id, req.title, reason)
-        log.info("Marked %s as wanted — will recheck for an acceptable release", req.title)
+        log.info("Marked %s as wanted  -  will recheck for an acceptable release", req.title)
         db.log_activity("wanted", req.title, f"{reason} ({req.imdb_id})", False)
     else:
         reason = _LAST_FAIL_REASON.pop(req.imdb_id, None) or "no suitable stream found"

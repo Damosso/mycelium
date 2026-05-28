@@ -40,7 +40,7 @@ function PluginCard({ plugin, session }: {
   const hasUi = !!plugin.settings_ui;
 
   // User-field toggles: only show if the admin has already enabled at least one
-  // field for this user. This keeps toggles admin-controlled — users can turn
+  // field for this user. This keeps toggles admin-controlled  -  users can turn
   // off what they have access to, but cannot self-grant new access.
   const anyFieldEnabled = hasFields &&
     plugin.user_fields.some(f => !!(session?.user as any)?.[f]);

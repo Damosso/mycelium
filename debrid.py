@@ -5,7 +5,7 @@ providers (TorBox + RealDebrid). The candidate selector in processor.py uses
 this to prefer cached releases across providers, falling back to a second
 debrid if TorBox doesn't have a release cached.
 
-Currently TorBox is primary and RealDebrid is fallback only — they don't share
+Currently TorBox is primary and RealDebrid is fallback only  -  they don't share
 .strm files, so a RealDebrid-only release would need RD-specific URL handling
 that the .strm generator can't produce yet. The plumbing is in place for when
 that's added.

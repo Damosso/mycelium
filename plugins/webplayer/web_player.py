@@ -515,7 +515,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         v_enc      = ["-c:v", "copy"]
         mode_label = "ts-copy"
     else:
-        v_enc      = ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
+        v_enc      = ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-pix_fmt", "yuv420p"]
         mode_label = f"ts-x264(from {video_codec})"
 
     # -ss BEFORE -i = fast keyframe seek.

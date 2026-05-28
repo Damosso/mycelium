@@ -78,12 +78,12 @@ def import_radarr(only_monitored: bool = True, throttle_sec: float = 1.0) -> dic
             if not imdb_id and m.get("tmdb_id"):
                 imdb_id = tmdb.tmdb_to_imdb(m["tmdb_id"], media_type="movie") or ""
             if not imdb_id:
-                log.warning("Radarr import: no imdb_id for %s — skipping", title)
+                log.warning("Radarr import: no imdb_id for %s  -  skipping", title)
                 _status["skipped"] += 1
                 _status["done"] = idx
                 continue
             if imdb_id in existing:
-                log.debug("Radarr import: %s already known (%s) — skipping", title, imdb_id)
+                log.debug("Radarr import: %s already known (%s)  -  skipping", title, imdb_id)
                 _status["skipped"] += 1
                 _status["done"] = idx
                 continue
@@ -98,7 +98,7 @@ def import_radarr(only_monitored: bool = True, throttle_sec: float = 1.0) -> dic
             _status["done"] = idx
             time.sleep(throttle_sec)
 
-        _set(message=f"Done — added {_status['added']}, skipped {_status['skipped']},"
+        _set(message=f"Done  -  added {_status['added']}, skipped {_status['skipped']},"
                        f" errors {_status['errors']}")
         return get_status()
     finally:
@@ -132,7 +132,7 @@ def import_sonarr(only_monitored: bool = True) -> dict:
             if not imdb_id and tmdb_id:
                 imdb_id = tmdb.tmdb_to_imdb(tmdb_id, media_type="tv") or ""
             if not imdb_id:
-                log.warning("Sonarr import: no imdb_id for %s — skipping", title)
+                log.warning("Sonarr import: no imdb_id for %s  -  skipping", title)
                 _status["skipped"] += 1
                 _status["done"] = idx
                 continue
@@ -156,7 +156,7 @@ def import_sonarr(only_monitored: bool = True) -> dict:
                 _status["errors"] += 1
             _status["done"] = idx
 
-        _set(message=f"Done — added {_status['added']}, skipped {_status['skipped']},"
+        _set(message=f"Done  -  added {_status['added']}, skipped {_status['skipped']},"
                        f" errors {_status['errors']}")
         return get_status()
     finally:

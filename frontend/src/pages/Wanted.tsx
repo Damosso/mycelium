@@ -133,12 +133,12 @@ function MovieRow({ movie }: { movie: WantedMovie }) {
         <div>{movie.title}</div>
         <div className="text-[10px] text-muted font-mono">{movie.imdb_id}</div>
       </td>
-      <td className="px-4 py-3 text-muted text-xs">{movie.reason || '—'}</td>
+      <td className="px-4 py-3 text-muted text-xs">{movie.reason || ' - '}</td>
       <td className="px-4 py-3 text-center">
         <span className="text-xs px-2 py-0.5 rounded bg-bg">{movie.attempts}</span>
       </td>
       <td className="px-4 py-3 text-xs text-muted">{fmtDate(movie.added_at)}</td>
-      <td className="px-4 py-3 text-xs text-muted">{movie.last_checked ? fmtDate(movie.last_checked) : '—'}</td>
+      <td className="px-4 py-3 text-xs text-muted">{movie.last_checked ? fmtDate(movie.last_checked) : ' - '}</td>
     </tr>
   );
 }
@@ -201,12 +201,12 @@ function EpisodesTable({
                       <td className="px-4 py-3 font-mono text-xs">
                         S{String(ep.season).padStart(2, '0')}E{String(ep.episode).padStart(2, '0')}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted">{ep.air_date || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-muted">{ep.air_date || ' - '}</td>
                       <td className="px-4 py-3 text-center">
                         <span className="text-xs px-2 py-0.5 rounded bg-bg">{ep.attempt_count}</span>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted">
-                        {ep.last_attempted ? fmtDate(ep.last_attempted) : '—'}
+                        {ep.last_attempted ? fmtDate(ep.last_attempted) : ' - '}
                       </td>
                     </tr>
                   ))}

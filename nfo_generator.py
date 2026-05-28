@@ -36,7 +36,7 @@ _PREFIX_RE = re.compile(
     r'|superseed\s+\S+\s*|\[BEST-TORRENTS[^\]]*\]\s*|\[XTORRENTY[^\]]*\]\s*)+',
     re.IGNORECASE,
 )
-_CYRILLIC_PREFIX_RE = re.compile(r'^[Ѐ-ӿ\s\(\)\[\]«»,.\-–—]+')
+_CYRILLIC_PREFIX_RE = re.compile(r'^[Ѐ-ӿ\s\(\)\[\]«»,.\-– - ]+')
 
 
 def _clean_for_tmdb(raw: str) -> str:
@@ -46,7 +46,7 @@ def _clean_for_tmdb(raw: str) -> str:
     # Strip parenthesised blocks containing Cyrillic (e.g. director name)
     s = re.sub(r'\([^)]*[Ѐ-ӿ][^)]*\)', '', s).strip()
     s = _SEASON_TRAIL_RE.sub("", s).strip()
-    # Strip trailing year in parens — passed separately as year_hint
+    # Strip trailing year in parens  -  passed separately as year_hint
     s = re.sub(r'\s*\(\d{4}\)\s*$', '', s).strip()
     s = _YEAR_TRAIL_RE.sub("", s).strip()
     s = re.sub(r"[\[\(\{\s\-]+$", "", s).strip()
@@ -118,7 +118,7 @@ def generate_all() -> dict:
 
     For series folders not found in the DB (messy torrent names), a TMDB lookup
     is attempted so that duplicate series folders get the same IMDb ID in their
-    tvshow.nfo — Jellyfin then merges them into a single library entry.
+    tvshow.nfo  -  Jellyfin then merges them into a single library entry.
     """
     media = Path(MEDIA_PATH)
     items_by_title = {m["title"]: m["imdb_id"] for m in db.get_media_items()}
@@ -157,7 +157,7 @@ def generate_all() -> dict:
                 except Exception:
                     imdb_id = None
                 if not imdb_id:
-                    # Retry without year hint — some films have wrong year in folder name
+                    # Retry without year hint  -  some films have wrong year in folder name
                     try:
                         imdb_id = tmdb.search_movie(clean, None)
                         time.sleep(0.2)
@@ -182,7 +182,7 @@ def generate_all() -> dict:
 
             imdb_id = items_by_title.get(folder.name)
             if not imdb_id or imdb_id.startswith("unknown_"):
-                # Not in DB — try TMDB lookup so duplicate folders get the right ID
+                # Not in DB  -  try TMDB lookup so duplicate folders get the right ID
                 clean = _clean_for_tmdb(folder.name)
                 if not clean:
                     continue
@@ -277,7 +277,7 @@ def fetch_local_images() -> dict:
                     except Exception:
                         pass
 
-                # Episode stills — one TMDB call per missing thumbnail
+                # Episode stills  -  one TMDB call per missing thumbnail
                 tmdb_id = tmdb.find_by_imdb(imdb_id, kind="tv")
                 if tmdb_id:
                     time.sleep(0.15)

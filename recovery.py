@@ -1,5 +1,5 @@
 """Recovery wizard: one button that runs a battery of repair tasks and
-reports a summary. Safe to run any time — every step is idempotent.
+reports a summary. Safe to run any time  -  every step is idempotent.
 """
 import logging
 

@@ -138,7 +138,7 @@ export default function Admin() {
                       />
                     </td>
                   ))}
-                  <td className="py-2 px-3 text-muted text-xs">{u.last_login || '—'}</td>
+                  <td className="py-2 px-3 text-muted text-xs">{u.last_login || ' - '}</td>
                   <td className="py-2 px-3 text-right">
                     {session?.user?.id !== u.id && (
                       <button
@@ -291,7 +291,7 @@ function ArrImportPanel() {
           <button
             onClick={async () => {
               if (!confirm('Import all Sonarr series + search for all episodes and create .strm files. This runs in the background and may take a while. Continue?')) return;
-              setMsg('Series backfill started — runs in background, check logs for progress…');
+              setMsg('Series backfill started  -  runs in background, check logs for progress…');
               await fetch('/ui/api/series-backfill', { method: 'POST' });
             }}
             disabled={s?.running}
@@ -305,7 +305,7 @@ function ArrImportPanel() {
           <div className="mb-3">
             <div className="flex justify-between text-xs text-muted mb-1">
               <span>
-                {s.running ? `Importing ${s.kind}…` : `Finished ${s.kind || ''}`} — {s.message}
+                {s.running ? `Importing ${s.kind}…` : `Finished ${s.kind || ''}`}  -  {s.message}
               </span>
               <span>{s.done}/{s.total} ({pct}%)</span>
             </div>
@@ -346,7 +346,7 @@ function MaintenancePanel() {
       if (data.requeued) parts.push(`requeued: ${data.requeued}`);
       if (data.skipped) parts.push(`skipped: ${data.skipped}`);
       const allGood = !data.missing_strm && !data.orphaned_tokens && !data.relinked && !data.requeued;
-      setResult('Done — ' + parts.join(', ') + (allGood ? ' — all links look good' : ''));
+      setResult('Done  -  ' + parts.join(', ') + (allGood ? '  -  all links look good' : ''));
     } catch (e: any) {
       setResult(`Error: ${e.message}`);
     } finally {
@@ -362,7 +362,7 @@ function MaintenancePanel() {
       const data = await r.json();
       const parts = [`scanned: ${data.scanned}`, `cleaned: ${data.cleaned}`];
       if (data.skipped) parts.push(`skipped: ${data.skipped}`);
-      setResult('Done — ' + parts.join(', ') + (data.cleaned > 0 ? ' — do a full Jellyfin library rescan now' : ' — nothing to clean'));
+      setResult('Done  -  ' + parts.join(', ') + (data.cleaned > 0 ? '  -  do a full Jellyfin library rescan now' : '  -  nothing to clean'));
     } catch (e: any) {
       setResult(`Error: ${e.message}`);
     } finally {
@@ -385,7 +385,7 @@ function MaintenancePanel() {
         `no imdb_id: ${data.no_imdb}`,
         ...(data.errors ? [`errors: ${data.errors}`] : []),
       ];
-      setResult('Done — ' + parts.join(', ') + ' — do a full Jellyfin library rescan now');
+      setResult('Done  -  ' + parts.join(', ') + '  -  do a full Jellyfin library rescan now');
     } catch (e: any) {
       setResult(`Error: ${e.message}`);
     } finally {

@@ -58,7 +58,7 @@ def merge_duplicate_versions(timeout: int = 60) -> bool:
         log.error("Jellyfin MergeVersions: could not fetch movies: %s", exc)
         return False
 
-    # Group by IMDb/TMDB provider ID when available (most reliable — collapses
+    # Group by IMDb/TMDB provider ID when available (most reliable  -  collapses
     # name variants, year mismatches, and 4K-vs-HD folders into one entry).
     # Fall back to normalised name only when an item carries no provider ID.
     import re as _re

@@ -89,12 +89,12 @@ def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
     usage_hour = createtorrent_usage(window_sec=3600)
     usage_min  = createtorrent_usage(window_sec=60)
     if usage_hour["count"] >= _CREATETORRENT_LIMIT_HOUR - 2:
-        log.warning("createtorrent [%s] SKIPPED — hourly quota %d/%d reached (resets ~%ds)",
+        log.warning("createtorrent [%s] SKIPPED  -  hourly quota %d/%d reached (resets ~%ds)",
                     reason, usage_hour["count"], _CREATETORRENT_LIMIT_HOUR,
                     usage_hour["resets_in_sec"])
         raise RateLimited()
     if usage_min["count"] >= _CREATETORRENT_LIMIT_MIN - 1:
-        log.warning("createtorrent [%s] SKIPPED — per-minute burst %d/%d reached",
+        log.warning("createtorrent [%s] SKIPPED  -  per-minute burst %d/%d reached",
                     reason, usage_min["count"], _CREATETORRENT_LIMIT_MIN)
         raise RateLimited()
     _record_createtorrent(reason)
@@ -103,13 +103,13 @@ def add_magnet(magnet: str, timeout: int = 30, reason: str = "unknown") -> dict:
     resp = requests.post(url, headers=_headers(), data={"magnet": magnet}, timeout=timeout)
     if resp.status_code == 429:
         retry_after = int(resp.headers.get("Retry-After", 60))
-        log.warning("createtorrent [%s] got 429 from TorBox (Retry-After=%ds) — raising RateLimited",
+        log.warning("createtorrent [%s] got 429 from TorBox (Retry-After=%ds)  -  raising RateLimited",
                     reason, retry_after)
         raise RateLimited()
     resp.raise_for_status()
     payload = resp.json() or {}
     if not payload.get("success", False):
-        # DUPLICATE_ITEM means the torrent is already in TorBox — treat as success
+        # DUPLICATE_ITEM means the torrent is already in TorBox  -  treat as success
         if payload.get("error") == "DUPLICATE_ITEM":
             log.info("Torbox: torrent already exists (DUPLICATE_ITEM), treating as success")
             invalidate_mylist_cache()
@@ -188,7 +188,7 @@ def find_by_hash(info_hash: str, force_refresh: bool = False) -> dict | None:
 
 
 def find_by_id(torrent_id: int, timeout: int = 15) -> dict | None:
-    """Fetch a single torrent by ID directly from TorBox — not limited to mylist top-1000."""
+    """Fetch a single torrent by ID directly from TorBox  -  not limited to mylist top-1000."""
     url = f"{TORBOX_BASE_URL.rstrip('/')}/torrents/mylist"
     try:
         resp = requests.get(url, headers=_headers(), timeout=timeout,
@@ -299,10 +299,11 @@ def check_cached(hashes: list[str], timeout: int = 15) -> set[str]:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in (429, 403) or "429" in str(exc) or "403" in str(exc):
             # 429 = rate limited; 403 = API key invalid / plan restriction.
-            # Either way the empty result is not trustworthy — raise so callers
-            # can apply a short backoff instead of a false "not cached" conclusion.
             raise RateLimited(f"checkcached {status or 'error'}")
-        return set()
+        # 5xx or network error: TorBox is temporarily unavailable.
+        # Raise so callers treat this as _SEARCH_UNAVAILABLE (30s cooldown)
+        # instead of silently returning an empty set that causes a false 6h miss.
+        raise RuntimeError(f"TorBox checkcached unavailable: {exc}")
     data = (resp.json() or {}).get("data") or {}
     cached = {h.lower() for h in data.keys()}
     log.info("TorBox cache check: %d/%d hashes cached", len(cached), len(hashes))
@@ -332,7 +333,7 @@ def wait_until_ready(info_hash: str, timeout: int | None = None,
     timeout defaults to TORBOX_POLL_TIMEOUT_SEC; pass a smaller value for
     latency-sensitive paths like on-play re-materialization.
     When torrent_id is given, uses find_by_id (single direct API call) instead
-    of scanning the full mylist — faster and not limited to the top 1000."""
+    of scanning the full mylist  -  faster and not limited to the top 1000."""
     limit = TORBOX_POLL_TIMEOUT_SEC if timeout is None else timeout
     deadline = time.monotonic() + limit
     last_state: str | None = None

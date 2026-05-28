@@ -57,6 +57,7 @@ if [ "$spore_replaced" = "1" ]; then
     if [ "$i_pos" -gt 0 ]; then
         cleaned=()
         skip_next=0
+        removed_eae_indices=()
         for idx in "${!newargs[@]}"; do
             if [ "$skip_next" = "1" ]; then
                 skip_next=0
@@ -70,6 +71,8 @@ if [ "$spore_replaced" = "1" ]; then
             if [ "$idx" -lt "$i_pos" ] && [[ "$arg" =~ ^-codec:[0-9]+$ ]] && \
                [[ "$next_arg" =~ ^(truehd|dts_ma)_eae$ ]]; then
                 skip_next=1
+                stream_n="${arg#-codec:}"
+                removed_eae_indices+=("$stream_n")
                 echo "$(date '+%H:%M:%S') WRAP removed pre-input: $arg $next_arg" >> "$SPORE_LOG"
                 echo "SPORE-WRAP: removed pre-input EAE hint: $arg $next_arg" >&2
                 continue
@@ -84,6 +87,40 @@ if [ "$spore_replaced" = "1" ]; then
             cleaned+=("$arg")
         done
         newargs=("${cleaned[@]}")
+    fi
+
+    # ── Inject native decoder hint to bypass EAE for input decoding ───────────
+    # Plex's patched FFmpeg auto-routes EAC3 input through eac3_eae even without
+    # an explicit pre-input hint. Under load (e.g. VAAPI video transcode on
+    # Shield TV) this causes EAE timeouts. cdn_audio_codec in .minfo tells us
+    # the actual codec so we can inject a native (non-EAE) decoder hint.
+    # Injected unconditionally (not just when EAE hints were removed) so it also
+    # works for stubs with non-TrueHD audio codecs that don't generate EAE hints.
+    cdn_audio_codec=""
+    if [ -f "$spore_minfo" ]; then
+        cdn_audio_codec=$(grep "^cdn_audio_codec=" "$spore_minfo" | head -1 | cut -d= -f2)
+    fi
+    if [ -n "$cdn_audio_codec" ]; then
+        i_pos_n=-1
+        for idx in "${!newargs[@]}"; do
+            if [ "${newargs[$idx]}" = "-i" ]; then i_pos_n=$idx; break; fi
+        done
+        if [ "$i_pos_n" -gt 0 ]; then
+            front=("${newargs[@]:0:$i_pos_n}")
+            back=("${newargs[@]:$i_pos_n}")
+            # Use removed EAE stream indices if available; otherwise default to 1
+            inject_indices=("${removed_eae_indices[@]}")
+            if [ ${#inject_indices[@]} -eq 0 ]; then
+                inject_indices=(1)
+            fi
+            native_hints=()
+            for ei in "${inject_indices[@]}"; do
+                native_hints+=("-codec:${ei}" "$cdn_audio_codec")
+                echo "$(date '+%H:%M:%S') WRAP inject native decoder: -codec:${ei} ${cdn_audio_codec}" >> "$SPORE_LOG"
+                echo "SPORE-WRAP: injected native decoder: -codec:${ei} ${cdn_audio_codec}" >&2
+            done
+            newargs=("${front[@]}" "${native_hints[@]}" "${back[@]}")
+        fi
     fi
 
     # ── Remap audio stream if preferred_audio > 0 ─────────────────────────────
