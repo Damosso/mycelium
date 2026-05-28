@@ -273,9 +273,19 @@ def _preload_spore(cdn_url: str, token: str) -> None:
         return
     try:
         import mp4_faststart, json as _json, subprocess as _sp
+        # Skip probe if already done (prevents redundant CPU work on re-play)
+        existing = db.load_spore_tracks(token)
+        if existing and existing.get("video_extradata_hex"):
+            return
+
         ok = mp4_faststart.build_and_cache(cdn_url, token)
         if not ok:
             return
+
+        # Extract CodecPrivate from the cached .fsh moov (no -show_data needed)
+        cp = mp4_faststart.extract_codec_private(token)
+        v_extra_hex = cp.hex() if cp else ""
+
         res = _sp.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_streams", "-show_format", cdn_url],
@@ -283,15 +293,18 @@ def _preload_spore(cdn_url: str, token: str) -> None:
         )
         if res.returncode != 0:
             return
-        data  = _json.loads(res.stdout)
+        data    = _json.loads(res.stdout)
         streams = data.get("streams", [])
         audio   = [s for s in streams if s.get("codec_type") == "audio"]
         subs    = [s for s in streams if s.get("codec_type") == "subtitle"]
         dur     = float(data.get("format", {}).get("duration", 0) or 0)
-        db.save_spore_tracks(token, {"audio": audio, "subs": subs, "duration_s": dur})
+        db.save_spore_tracks(token, {
+            "audio": audio, "subs": subs, "duration_s": dur,
+            "video_extradata_hex": v_extra_hex,
+        })
         update_stub_from_probe(token, audio, subs, duration_s=dur or None)
-        log.info("Preload: spore probe done token=%s dur=%.0fs subs=%d",
-                 token, dur, len(subs))
+        log.info("Preload: spore probe done token=%s dur=%.0fs subs=%d extradata=%d",
+                 token, dur, len(subs), len(cp or b''))
     except Exception as exc:
         log.debug("Preload: spore probe failed token=%s: %s", token, exc)
 
@@ -580,7 +593,8 @@ def make_stub_mkv(title: str, quality: str | None = None,
                    duration_sec: float = 7200.0,
                    codec_id: str | None = None,
                    audio_tracks: list[dict] | None = None,
-                   subtitle_tracks: list[dict] | None = None) -> bytes:
+                   subtitle_tracks: list[dict] | None = None,
+                   video_codec_private: bytes | None = None) -> bytes:
     """Generate a minimal valid MKV file for Plex scanning.
 
     audio_tracks: list of dicts with keys codec, language, channels, sample_rate.
@@ -637,6 +651,7 @@ def make_stub_mkv(title: str, quality: str | None = None,
         _ebml_el(b'\xB9', _ebml_uint(1)) +
         _ebml_el(b'\x88', _ebml_uint(1)) +
         _ebml_el(b'\x86', codec_id.encode()) +
+        (_ebml_el(b'\x63\xA2', video_codec_private) if video_codec_private else b'') +
         _ebml_el(b'\xE0', video_data)
     ))
 
@@ -658,8 +673,10 @@ def make_stub_mkv(title: str, quality: str | None = None,
             )
             next_num += 1
     else:
-        # TrueHD placeholder: forces Plex to invoke transcoder instead of
-        # direct-playing the stub. No client can passthrough TrueHD natively.
+        # TrueHD 8ch placeholder: no Plex client can Direct Play TrueHD without
+        # HDMI passthrough to an AV receiver, so Plex always invokes the external
+        # transcoder (our wrapper intercepts -i stub.mkv -> spore-stream URL).
+        # EAC3 would allow Direct Play on modern phones/Shield and must NOT be used.
         tracks_data += _ebml_audio_track_entry(
             track_num=2, codec_mkv="A_TRUEHD", lang="und",
             channels=8, sample_rate=48000.0, is_default=True,
@@ -842,23 +859,34 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
         mkv_path  = stub_dir / (strm_path.stem + ".mkv")
 
         try:
-            saved = db.load_spore_tracks(item["token"])
+            saved = db.load_spore_tracks(item["token"]) or {}
+            # audio_tracks=None: always use TrueHD 8ch placeholder so Plex never
+            # Direct Plays the stub. Real audio info is in the DB for metadata only.
             sub_tracks = [
                 {"codec": s.get("codec_name", "subrip"),
                  "language": (s.get("tags") or {}).get("language", "und")[:3]}
-                for s in (saved or {}).get("subs", [])
+                for s in saved.get("subs", [])
             ] or None
-            dur = float((saved or {}).get("duration_s") or 0) or 7200.0
+            dur = float(saved.get("duration_s") or 0) or 7200.0
+            v_extra_hex = saved.get("video_extradata_hex") or ""
+            try:
+                v_extra = bytes.fromhex(v_extra_hex) if v_extra_hex else None
+            except ValueError:
+                log.debug("Spore regenerate: invalid extradata hex for %s, skipping", strm_path.name)
+                v_extra = None
             stub = make_stub_mkv(
                 item.get("title") or strm_path.stem,
                 item.get("quality"),
                 duration_sec=dur,
+                audio_tracks=None,
                 subtitle_tracks=sub_tracks,
+                video_codec_private=v_extra,
             )
             mkv_path.write_bytes(stub)
             codec = _codec_id_for_quality(item.get("quality"))
-            log.info("Spore: regenerated stub %s (codec=%s subs=%d)",
-                     mkv_path.name, codec, len(sub_tracks or []))
+            log.info("Spore: regenerated stub %s (codec=%s subs=%d extradata=%d)",
+                     mkv_path.name, codec,
+                     len(sub_tracks or []), len(v_extra or b''))
             regenerated += 1
         except Exception as exc:
             log.warning("Spore regenerate: failed for %s: %s", strm_path.name, exc)
@@ -890,8 +918,17 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
     if not mkv_path.parent.exists():
         return False
 
-    # Keep A_TRUEHD placeholder for audio so Plex always invokes the transcoder
-    # instead of direct-playing the stub. Only subtitle tracks are updated.
+    saved = db.load_spore_tracks(token) or {}
+    v_extra_hex = saved.get("video_extradata_hex") or ""
+    try:
+        v_extra = bytes.fromhex(v_extra_hex) if v_extra_hex else None
+    except ValueError:
+        v_extra = None
+
+    # Keep audio_tracks=None so make_stub_mkv uses the TrueHD 8ch placeholder.
+    # TrueHD forces Plex to invoke the external transcoder (our wrapper intercepts
+    # -i stub.mkv -> spore-stream URL). Passing real EAC3 tracks would allow
+    # Direct Play on Shield/Android, bypassing the wrapper entirely.
     subtitle_tracks = [
         {
             "codec":    s.get("codec_name", "subrip"),
@@ -907,11 +944,12 @@ def update_stub_from_probe(token: str, audio_streams: list[dict],
             duration_sec=duration_s or 7200.0,
             audio_tracks=None,
             subtitle_tracks=subtitle_tracks or None,
+            video_codec_private=v_extra,
         )
         mkv_path.write_bytes(stub)
         log.info(
-            "Spore: updated stub for token=%s with %d audio + %d subtitle tracks",
-            token, len(audio_streams), len(subtitle_tracks),
+            "Spore: updated stub for token=%s with %d audio + %d subs (extradata=%d bytes)",
+            token, len(audio_streams), len(subtitle_tracks), len(v_extra or b''),
         )
         return True
     except Exception as exc:
