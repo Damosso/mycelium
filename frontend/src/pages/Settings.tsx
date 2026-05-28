@@ -110,21 +110,30 @@ function PreferencesCard() {
 
   const mutation = useMutation({
     mutationFn: (prefs: Record<string, boolean>) => api.setPreferences(prefs),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['session'] }),
+    onError: () => {
+      // Revert optimistic update on failure
+      qc.invalidateQueries({ queryKey: ['session'] });
+    },
   });
 
-  const toggle = () => mutation.mutate({ library_click_jellyfin: !clickJellyfin });
+  const toggle = () => {
+    const newVal = !clickJellyfin;
+    // Optimistic update: immediately flip in the shared session cache so
+    // Library.tsx (which reads the same cache) picks it up without a reload.
+    qc.setQueryData(['session'], (old: any) =>
+      old ? { ...old, user: { ...old.user, library_click_jellyfin: newVal } } : old,
+    );
+    mutation.mutate({ library_click_jellyfin: newVal });
+  };
 
   return (
     <div className="bg-card rounded-lg border border-border p-6">
       <h2 className="text-base font-bold mb-1">Preferences</h2>
       <p className="text-muted text-xs mb-4">Personalise how the app behaves for your account.</p>
       <div className="space-y-3">
-        <label className="flex items-start gap-3 cursor-pointer select-none">
-          <div className="mt-0.5">
-            <div
-              onClick={toggle}
-              className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5 cursor-pointer
+        <label className="flex items-start gap-3 cursor-pointer select-none" onClick={toggle}>
+          <div className="mt-0.5 flex-shrink-0">
+            <div className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5
                 ${clickJellyfin ? 'bg-accent' : 'bg-border'}`}
             >
               <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform

@@ -194,11 +194,8 @@ MULTI_DEBRID_ENABLED = _env("MULTI_DEBRID_ENABLED", "false").lower() in ("1", "t
 REALDEBRID_API_KEY = _env("REALDEBRID_API_KEY", "")
 REALDEBRID_BASE_URL = _env("REALDEBRID_BASE_URL", "https://api.real-debrid.com/rest/1.0")
 
-# ── Mycelium Spore (Plex Interceptor) ────────────────────────────────────────
-# When enabled, Mycelium writes stub .mkv + .minfo files in a hidden .plex/
-# subfolder alongside every .strm.  The compiled mycelium_spore.so injected
-# into Plex via LD_PRELOAD intercepts file I/O and proxies real bytes from CDN.
-# See spore/ directory and docs for Docker Compose setup.
+# ── Mycelium Spore (Plex) ────────────────────────────────────────────────────
+# Stub .mkv library + transcoder wrapper. See spore/ directory for setup.
 SPORE_ENABLED    = _env("SPORE_ENABLED", "false").lower() in ("1", "true", "yes")
 SPORE_PORT       = _env_int("SPORE_PORT", 8089)
 SPORE_MEDIA_PATH = _env("SPORE_MEDIA_PATH", "/data/plex-media")

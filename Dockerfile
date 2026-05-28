@@ -1,17 +1,4 @@
-# ── Stage 1: compile Mycelium Spore interceptor ──────────────────────────────
-# Must be built against glibc 2.35 (same ABI as Plex Media Server on Ubuntu 22.04).
-# ubuntu:22.04 has glibc 2.35 - prevents __isoc23_strtoll (glibc 2.38+) symbols.
-FROM ubuntu:22.04 AS spore-builder
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc-dev \
-    && rm -rf /var/lib/apt/lists/*
-COPY spore/spore.c spore/spore.map /build/
-RUN gcc -shared -fPIC -O2 -std=gnu11 -D_POSIX_C_SOURCE=200809L -D_LARGEFILE64_SOURCE \
-        -o /build/mycelium_spore.so /build/spore.c \
-        -ldl -lpthread \
-        -Wl,--version-script=/build/spore.map \
-    && strip /build/mycelium_spore.so
-
-# ── Stage 2: build the React + Vite frontend ─────────────────────────────────
+# ── Stage 1: build the React + Vite frontend ─────────────────────────────────
 FROM node:22-alpine AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
@@ -46,10 +33,8 @@ COPY *.py ./
 COPY plugins/ ./plugins/
 COPY templates/ ./templates/
 COPY docs/ ./docs/
-# Built SPA from stage 2 (Vite writes to ../static/app relative to frontend/)
+# Built SPA from stage 1 (Vite writes to ../static/app relative to frontend/)
 COPY --from=frontend /static/app/ ./static/app/
-# Spore interceptor .so (inject into Plex via LD_PRELOAD)
-COPY --from=spore-builder /build/mycelium_spore.so ./spore/mycelium_spore.so
 
 EXPOSE 8088
 

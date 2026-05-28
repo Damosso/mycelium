@@ -1,8 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, tmdbImg } from '../api';
+import { api } from '../api';
 import { usePluginSlot } from '../hooks/usePluginSlots';
-import { useWatched } from '../hooks/useWatched';
+import PosterCard from '../components/PosterCard';
 import DetailModal from '../components/DetailModal';
 import type { TmdbItem } from '../types';
 
@@ -39,21 +39,27 @@ function MoviesPanel() {
     queryFn: api.libraryMovies,
   });
   const { data: session } = useQuery({ queryKey: ['session'], queryFn: api.session });
-  const canPlay = !!(session?.user as any)?.webplayer_enabled;
   const clickJellyfin = !!(session?.user as any)?.library_click_jellyfin;
-  const jellyfinUrl = session?.jellyfin_url ?? null;
-  const watched = useWatched();
-  const MoviePlayer = usePluginSlot('movie-player');
 
-  const [playMovie, setPlayMovie] = useState<{ imdb_id: string; title: string } | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<'all' | 'available' | 'wanted'>('all');
-
-  // DetailModal state (tmdb_id + mediaType)
-  const [modalItem, setModalItem] = useState<{ tmdb_id: number; title: string } | null>(null);
+  const [modalItem, setModalItem] = useState<{ tmdb_id: number; media_type: string; title: string } | null>(null);
 
   const items = useMemo(() => data?.items || [], [data]);
+
+  // Pre-fetch all Jellyfin item IDs when Jellyfin mode is on.
+  // Stored as a Map so clicking is always synchronous (no popup blocker).
+  const allImdbIds = useMemo(() => items.map((m: any) => m.imdb_id).filter(Boolean), [items]);
+  const { data: jellyfinData } = useQuery({
+    queryKey: ['jellyfin-items', allImdbIds],
+    queryFn: () => api.jellyfinItems(allImdbIds),
+    enabled: clickJellyfin && allImdbIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const jellyfinMap: Record<string, string | null> = jellyfinData?.items ?? {};
+  const jellyfinUrl = jellyfinData?.jellyfin_url ?? session?.jellyfin_url ?? null;
 
   const filtered = useMemo(() => {
     let list = items;
@@ -72,28 +78,34 @@ function MoviesPanel() {
     [filtered, page],
   );
 
-  // Reset to page 1 when search/filter changes
   const handleSearch = (v: string) => { setSearch(v); setPage(1); };
   const handleFilter = (v: typeof filter) => { setFilter(v); setPage(1); };
 
-  const handlePosterClick = useCallback(async (m: any) => {
-    if (canPlay && playMovie === null && false) return; // unused branch, kept for clarity
-    if (clickJellyfin && jellyfinUrl && m.imdb_id) {
-      // Look up Jellyfin item ID, then open in a new tab
+  const openModal = useCallback(async (m: any) => {
+    // Resolve tmdb_id if missing (older items may not have it)
+    let tmdbId: number | null = m.tmdb_id ?? null;
+    let mediaType: string = m.media_type ?? 'movie';
+    if (!tmdbId && m.imdb_id) {
       try {
-        const res = await api.jellyfinItem(m.imdb_id);
-        if (res.jellyfin_id) {
-          const base = (res.jellyfin_url || jellyfinUrl).replace(/\/$/, '');
-          window.open(`${base}/web/index.html#!/details?id=${res.jellyfin_id}`, '_blank');
-          return;
-        }
-      } catch { /* fall through to modal */ }
+        const found = await api.tmdbFind(m.imdb_id);
+        if (found.tmdb_id) { tmdbId = found.tmdb_id; mediaType = found.media_type ?? 'movie'; }
+      } catch { /* ignore */ }
     }
-    // Default: open detail modal if tmdb_id is available
-    if (m.tmdb_id) {
-      setModalItem({ tmdb_id: m.tmdb_id, title: m.title });
+    if (tmdbId) setModalItem({ tmdb_id: tmdbId, media_type: mediaType, title: m.title });
+  }, []);
+
+  const handlePosterClick = useCallback((m: any) => {
+    if (clickJellyfin && m.imdb_id && m.status === 'success') {
+      const jid = jellyfinMap[m.imdb_id];
+      const jurl = (jellyfinData?.jellyfin_url || jellyfinUrl || '').replace(/\/$/, '');
+      if (jid && jurl) {
+        window.open(`${jurl}/web/index.html#!/details?id=${jid}`, '_blank');
+        return;
+      }
+      // Item not in Jellyfin or URL not configured: fall through to modal
     }
-  }, [clickJellyfin, jellyfinUrl, canPlay, playMovie]);
+    openModal(m);
+  }, [clickJellyfin, jellyfinUrl, jellyfinData, jellyfinMap, openModal]);
 
   if (isLoading) return <div className="text-muted">Loading...</div>;
 
@@ -138,14 +150,11 @@ function MoviesPanel() {
       {paginated.length === 0 ? (
         <p className="text-muted text-sm py-8 text-center">No movies found.</p>
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 200px))' }}>
           {paginated.map((m: any) => (
-            <MovieCard
+            <LibraryPosterCard
               key={m.imdb_id}
               movie={m}
-              isWatched={watched.has(m.imdb_id)}
-              canPlay={canPlay}
-              onPlay={() => setPlayMovie({ imdb_id: m.imdb_id, title: m.title })}
               onClick={() => handlePosterClick(m)}
             />
           ))}
@@ -179,24 +188,14 @@ function MoviesPanel() {
         </div>
       )}
 
-      {/* Webplayer */}
-      {playMovie && MoviePlayer && (
-        <MoviePlayer
-          imdb_id={playMovie.imdb_id}
-          media_type="movie"
-          title={playMovie.title}
-          onClose={() => setPlayMovie(null)}
-        />
-      )}
-
       {/* Detail modal */}
       {modalItem && (
         <DetailModal
           tmdbId={modalItem.tmdb_id}
-          mediaType="movie"
+          mediaType={modalItem.media_type as any}
           onClose={() => setModalItem(null)}
           onSelectItem={(item: TmdbItem) => {
-            if (item.tmdb_id) setModalItem({ tmdb_id: item.tmdb_id, title: item.title });
+            if (item.tmdb_id) setModalItem({ tmdb_id: item.tmdb_id, media_type: item.media_type, title: item.title });
           }}
         />
       )}
@@ -204,96 +203,41 @@ function MoviesPanel() {
   );
 }
 
-function MovieCard({
-  movie,
-  isWatched,
-  canPlay,
-  onPlay,
-  onClick,
-}: {
-  movie: any;
-  isWatched: boolean;
-  canPlay: boolean;
-  onPlay: () => void;
-  onClick: () => void;
-}) {
-  const poster = tmdbImg.poster(movie.poster_path);
-  const isAvailable = movie.status === 'success';
-  const isWanted    = !isAvailable;
+/** Wraps PosterCard with lazy poster fetching for library items that lack a cached poster_path. */
+function LibraryPosterCard({ movie, onClick }: { movie: any; onClick: () => void }) {
+  // Lazy-fetch poster when not already cached in the library response
+  const { data: lazyPoster } = useQuery({
+    queryKey: ['poster', movie.imdb_id],
+    queryFn: () => fetch(`/ui/api/poster/${movie.imdb_id}?type=movie`).then(r => r.json()),
+    enabled: !movie.poster_path && !!movie.imdb_id,
+    staleTime: Infinity,
+    retry: false,
+  });
 
-  return (
-    <div className="group relative flex flex-col">
-      <button
-        type="button"
-        onClick={onClick}
-        className="relative aspect-[2/3] rounded-lg overflow-hidden bg-card border border-border
-                   hover:border-accent/60 transition focus:outline-none focus:border-accent"
-        title={movie.title}
-      >
-        {poster ? (
-          <img
-            src={poster}
-            alt={movie.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center p-2">
-            <span className="text-[10px] text-muted text-center leading-tight line-clamp-4">
-              {movie.title}
-            </span>
-          </div>
-        )}
+  // poster_path is a TMDB relative path; lazyPoster.poster is already a full URL,
+  // so we store it as a fake path by stripping the base prefix PosterCard will re-add.
+  const resolvedPath: string | null =
+    movie.poster_path ??
+    (lazyPoster?.poster
+      ? lazyPoster.poster.replace(/^https:\/\/image\.tmdb\.org\/t\/p\/w\d+/, '')
+      : null);
 
-        {/* Status badge */}
-        {isWanted && (
-          <div className="absolute top-1 left-1">
-            <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/90 text-black font-semibold">
-              Wanted
-            </span>
-          </div>
-        )}
-        {isWatched && (
-          <div className="absolute top-1 right-1">
-            <span className="text-[9px] px-1 py-0.5 rounded bg-green-600/90 text-white font-semibold">
-              ✓
-            </span>
-          </div>
-        )}
+  const item: TmdbItem = {
+    tmdb_id:      movie.tmdb_id ?? 0,
+    media_type:   'movie',
+    title:        movie.title,
+    year:         movie.year ? String(movie.year) : null,
+    rating:       0,
+    votes:        0,
+    popularity:   0,
+    overview:     '',
+    poster_path:  resolvedPath,
+    backdrop_path: null,
+    imdb_id:      movie.imdb_id,
+    library_status: movie.status,
+  } as TmdbItem & { imdb_id?: string };
 
-        {/* Quality badge */}
-        {movie.quality && (
-          <div className="absolute bottom-1 left-1">
-            <span className="text-[9px] px-1 py-0.5 rounded bg-black/70 text-white font-mono">
-              {movie.quality}
-            </span>
-          </div>
-        )}
-
-        {/* Play overlay */}
-        {canPlay && isAvailable && (
-          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100
-                          transition-opacity flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onPlay(); }}
-              className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500
-                         text-white font-semibold transition-colors"
-              title="Play in browser"
-            >
-              ▶ Play
-            </button>
-          </div>
-        )}
-      </button>
-
-      {/* Title below card */}
-      <p className="mt-1 text-[11px] text-muted leading-tight line-clamp-2 text-center px-0.5">
-        {movie.title}
-        {movie.year ? <span className="text-[10px]"> ({movie.year})</span> : null}
-      </p>
-    </div>
-  );
+  return <PosterCard item={item} onClick={() => onClick()} status={movie.status} />;
 }
 
 function SeriesPanel() {

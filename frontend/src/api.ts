@@ -162,9 +162,19 @@ export const api = {
       body: JSON.stringify(prefs),
     }),
 
-  // Jellyfin item lookup
+  // Jellyfin item lookup (single)
   jellyfinItem: (imdb_id: string) =>
     http<{ jellyfin_id: string | null; jellyfin_url: string | null }>(`/ui/api/jellyfin/item?imdb_id=${encodeURIComponent(imdb_id)}`),
+
+  // Jellyfin batch lookup
+  jellyfinItems: (imdb_ids: string[]) =>
+    http<{ jellyfin_url: string | null; items: Record<string, string | null> }>(
+      `/ui/api/jellyfin/items?imdb_ids=${imdb_ids.map(encodeURIComponent).join(',')}`,
+    ),
+
+  // TMDB find by IMDB id
+  tmdbFind: (imdb_id: string) =>
+    http<{ tmdb_id: number | null; media_type: string | null }>(`/ui/api/tmdb/find?imdb_id=${encodeURIComponent(imdb_id)}`),
 
   // Library / dashboard
   session: () => http<SessionInfo>('/ui/api/session'),

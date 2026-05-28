@@ -2476,6 +2476,78 @@ def ui_api_jellyfin_item():
     return jsonify(jellyfin_id=jid, jellyfin_url=jurl or None)
 
 
+@app.get("/ui/api/jellyfin/items")
+@auth.require_auth
+def ui_api_jellyfin_items():
+    """Build imdb_id -> jellyfin_id map by fetching the full Jellyfin library once.
+    Cached in memory; returns {jellyfin_url, items: {imdb_id: jellyfin_id_or_null}}."""
+    import settings as _settings
+    raw = request.args.get("imdb_ids", "").strip()
+    if not raw:
+        return jsonify(jellyfin_url=None, items={})
+    want = {x.strip() for x in raw.split(",") if x.strip()}
+    jurl = (_settings.get("JELLYFIN_URL") or cfg.JELLYFIN_URL or "").rstrip("/")
+    jkey = _settings.get("JELLYFIN_API_KEY") or cfg.JELLYFIN_API_KEY or ""
+    # Serve fully from cache when all requested IDs are already known
+    if want.issubset(_jellyfin_item_cache):
+        return jsonify(jellyfin_url=jurl or None,
+                       items={iid: _jellyfin_item_cache[iid] for iid in want})
+    if jurl and jkey:
+        try:
+            import requests as _req
+            # Fetch ALL movies+series from Jellyfin with their provider IDs in one call.
+            # Jellyfin does not support filtering by multiple IMDb IDs simultaneously,
+            # so we pull the whole library and match locally.
+            resp = _req.get(
+                f"{jurl}/Items",
+                params={
+                    "includeItemTypes": "Movie,Series",
+                    "Fields": "ProviderIds",
+                    "Recursive": "true",
+                    "Limit": 10000,
+                },
+                headers={"X-Emby-Token": jkey},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            for it in (resp.json() or {}).get("Items") or []:
+                iid = (it.get("ProviderIds") or {}).get("Imdb") or ""
+                if iid:
+                    _jellyfin_item_cache[iid] = it["Id"]
+        except Exception as exc:
+            log.debug("Jellyfin batch lookup failed: %s", exc)
+    return jsonify(jellyfin_url=jurl or None,
+                   items={iid: _jellyfin_item_cache.get(iid) for iid in want})
+
+
+@app.get("/ui/api/tmdb/find")
+@auth.require_auth
+def ui_api_tmdb_find():
+    """Resolve imdb_id to tmdb_id + media_type via TMDB /find endpoint."""
+    imdb_id = request.args.get("imdb_id", "").strip()
+    if not imdb_id:
+        return jsonify(tmdb_id=None, media_type=None)
+    # Check DB first
+    with db._connect() as conn:
+        row = conn.execute(
+            "SELECT tmdb_id, media_type FROM requests WHERE imdb_id=? AND tmdb_id IS NOT NULL LIMIT 1",
+            (imdb_id,),
+        ).fetchone()
+    if row:
+        return jsonify(tmdb_id=row["tmdb_id"], media_type=row["media_type"])
+    try:
+        data = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"})
+        movie_results = data.get("movie_results") or []
+        tv_results    = data.get("tv_results") or []
+        if movie_results:
+            return jsonify(tmdb_id=movie_results[0]["id"], media_type="movie")
+        if tv_results:
+            return jsonify(tmdb_id=tv_results[0]["id"], media_type="tv")
+    except Exception as exc:
+        log.debug("TMDB find %s failed: %s", imdb_id, exc)
+    return jsonify(tmdb_id=None, media_type=None)
+
+
 @app.post("/ui/api/users/<int:user_id>/delete")
 def ui_api_users_delete(user_id: int):
     if not auth.is_admin():
