@@ -12,22 +12,36 @@ echo "$(date '+%H:%M:%S') WRAP started" >> "$SPORE_LOG"
 # this env var when spawning the transcoder, but it is sometimes missing
 # (known Plex bug). Discover and export it here as a fallback so EAE can init.
 echo "$(date '+%H:%M:%S') WRAP EAE_ROOT=${EAE_ROOT:-(not set)}" >> "$SPORE_LOG"
-if [ -z "$EAE_ROOT" ]; then
-    # 1. Glob patterns -- faster than find, no root required
-    for _eae_try in \
-        /run/plex-temp/pms-*/EasyAudioEncoder \
-        /run/pms-*/EasyAudioEncoder \
-        /tmp/pms-*/EasyAudioEncoder \
-        /var/tmp/pms-*/EasyAudioEncoder; do
-        if [ -d "$_eae_try" ]; then
-            export EAE_ROOT="$_eae_try"
-            echo "$(date '+%H:%M:%S') WRAP EAE_ROOT via glob: $EAE_ROOT" >> "$SPORE_LOG"
-            break
+# Find the pms-xxx base directory under /run/plex-temp
+_pms_base=""
+for _d in /run/plex-temp/pms-*/ /tmp/pms-*/; do
+    [ -d "$_d" ] && _pms_base="$_d" && break
+done
+echo "$(date '+%H:%M:%S') WRAP pms_base=${_pms_base:-(not found)}" >> "$SPORE_LOG"
+if [ -n "$_pms_base" ]; then
+    echo "$(date '+%H:%M:%S') WRAP pms contents: $(ls "$_pms_base" 2>&1 | tr '\n' ' ')" >> "$SPORE_LOG"
+fi
+
+if [ -z "$EAE_ROOT" ] && [ -n "$_pms_base" ]; then
+    _eae_candidate="${_pms_base}EasyAudioEncoder"
+    if [ -d "$_eae_candidate" ]; then
+        # Directory already exists
+        export EAE_ROOT="$_eae_candidate"
+        echo "$(date '+%H:%M:%S') WRAP EAE_ROOT exists: $EAE_ROOT" >> "$SPORE_LOG"
+    else
+        # EAE hasn't created it yet -- create it ourselves.
+        # EAE watches the parent dir via inotify and will pick up the new directory.
+        mkdir -p "$_eae_candidate" 2>/dev/null
+        if [ -d "$_eae_candidate" ]; then
+            export EAE_ROOT="$_eae_candidate"
+            echo "$(date '+%H:%M:%S') WRAP EAE_ROOT created: $EAE_ROOT" >> "$SPORE_LOG"
+        else
+            echo "$(date '+%H:%M:%S') WRAP WARNING: mkdir failed for $EAE_ROOT" >> "$SPORE_LOG"
         fi
-    done
+    fi
 fi
 if [ -z "$EAE_ROOT" ]; then
-    # 2. Read EAE_ROOT from Plex Media Server process environment
+    # Fallback: read from Plex Media Server process environment
     for _pid in $(pgrep -f "Plex Media Server" 2>/dev/null | head -5); do
         [ -r "/proc/$_pid/environ" ] || continue
         _val=$(tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null \
@@ -40,9 +54,7 @@ if [ -z "$EAE_ROOT" ]; then
     done
 fi
 if [ -z "$EAE_ROOT" ]; then
-    echo "$(date '+%H:%M:%S') WRAP WARNING: EAE_ROOT not found" >> "$SPORE_LOG"
-    echo "$(date '+%H:%M:%S') WRAP /run: $(ls /run 2>&1 | tr '\n' ' ')" >> "$SPORE_LOG"
-    echo "$(date '+%H:%M:%S') WRAP /run/plex-temp: $(ls /run/plex-temp 2>&1 | tr '\n' ' ')" >> "$SPORE_LOG"
+    echo "$(date '+%H:%M:%S') WRAP WARNING: EAE_ROOT still not set" >> "$SPORE_LOG"
 fi
 
 newargs=()
