@@ -8,7 +8,12 @@
       "New preference: open library posters directly in Jellyfin web (Settings > Preferences)",
       "Jellyfin batch lookup pre-fetched so poster clicks are synchronous (no popup blocker)",
       "Fix: arm64 CI build crash caused by dead spore-builder Dockerfile stage",
-      "Fix: Jellyfin click mode now activates instantly after toggling (optimistic session update)"
+      "Fix: Jellyfin click mode now activates instantly after toggling (optimistic session update)",
+      "Fix: tvshow.nfo files with 'Season XX' as title repaired with correct series name",
+      "Fix: movie NFOs with Jellyfin collection tags causing '()' in title removed",
+      "Fix: xml escaping for & in titles (e.g. Myths & Monsters) in generated NFOs",
+      "Fix: season.nfo files removed - were causing Jellyfin to display season name instead of series name",
+      "Admin: new maintenance action to repair tvshow NFO titles (Admin > Maintenance)"
     ]
   },
   {
