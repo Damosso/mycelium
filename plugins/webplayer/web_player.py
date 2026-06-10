@@ -436,7 +436,7 @@ def _run_job(job: PrepareJob) -> None:
                 job.token    = _hash
                 job.file_info = existing_direct.file_info
                 job.status   = JobStatus.PREPARING
-                job.message  = "Transcoding HEVC to 720p..."
+                job.message  = "Transcoding HEVC to H264..."
                 _do_hls_conversion(_hash, existing_direct.file_info)
                 tmp_dir  = PLAYER_TMP_DIR / _hash
                 err_file = tmp_dir / "hls_error.txt"
@@ -498,7 +498,7 @@ def _run_job(job: PrepareJob) -> None:
         needs_hls = hevc_fallback or file_info.get('video_codec') == 'hevc'
 
         job.status  = JobStatus.PREPARING
-        job.message = "Transcoding HEVC to 720p..." if needs_hls else "Preparing for playback..."
+        job.message = "Transcoding HEVC to H264..." if needs_hls else "Preparing for playback..."
 
         _start_direct(session_key, file_info, cdn_url,
                       torrent_id=torrent_id, file_id=file_id)
@@ -840,7 +840,7 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
     Strategy:
     - H.264: mpegts segments, video copy, audio copy-or-aac. Near-zero CPU.
     - HEVC/other + VA-API available: hardware decode+encode via Intel QSV.
-      Near-zero CPU, near-realtime. 720p cap when source > 720p.
+      No scaling - original resolution preserved.
     - HEVC/other + no VA-API: software ultrafast + 720p cap (last resort).
 
     seek_offset > 0 = fast keyframe seek in input before generating segments.
@@ -865,18 +865,13 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         mode_label = "ts-copy"
     elif _vaapi_ok:
         # Hardware transcode via Intel QuickSync VA-API.
-        # Decode HEVC in GPU, encode H264 in GPU.
-        # Use hwdownload+software scale+hwupload instead of scale_vaapi to avoid
-        # VPP pipeline failures on 10-bit HEVC sources (e.g. Apollo Lake J3455).
+        # Decode HEVC in GPU, convert pixel format on CPU (handles 10-bit),
+        # re-upload, encode H264 in GPU. No scaling - original resolution.
         hw_pre = ["-hwaccel", "vaapi",
                   "-hwaccel_device", _VAAPI_DEV,
                   "-hwaccel_output_format", "vaapi"]
-        if src_height > 720:
-            vf_scale = ["-vf", "hwdownload,format=nv12,scale=-2:720,hwupload"]
-        else:
-            # Still need nv12 conversion for 10-bit sources before h264_vaapi.
-            vf_scale = ["-vf", "hwdownload,format=nv12,hwupload"]
-        v_enc  = vf_scale + ["-c:v", "h264_vaapi", "-qp", "23"]
+        v_enc  = ["-vf", "hwdownload,format=nv12,hwupload",
+                  "-c:v", "h264_vaapi", "-qp", "23"]
         mode_label = f"ts-vaapi(from {video_codec})"
     else:
         # Software fallback: ultrafast + 720p cap.
