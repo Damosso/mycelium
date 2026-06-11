@@ -887,13 +887,18 @@ def _start_hls(token: str, cdn_url: str, file_info: dict, tmp_dir: Path,
         hw_pre     = []
         mode_label = "ts-copy"
     elif _vaapi_ok:
-        # Software decode (handles 10-bit HEVC correctly), VA-API H264 encode.
-        # -vaapi_device provides the device for encoding only; decode stays on CPU.
-        # format=nv12 converts 10-bit yuv420p10le to 8-bit before hwupload.
-        hw_pre = ["-vaapi_device", _VAAPI_DEV]
+        # Hardware decode + encode via VA-API.
+        # -hwaccel_output_format nv12 forces the VA-API decoder to output 8-bit
+        # NV12 to system memory, handling 10-bit HEVC without green corruption.
+        # hwupload then moves the NV12 frame to a VA-API surface for h264_vaapi.
+        hw_pre = [
+            "-hwaccel", "vaapi",
+            "-hwaccel_device", _VAAPI_DEV,
+            "-hwaccel_output_format", "nv12",
+        ]
         v_enc  = ["-vf", "format=nv12,hwupload=extra_hw_frames=64",
                   "-c:v", "h264_vaapi", "-qp", "23"]
-        mode_label = f"ts-vaapi-enc(from {video_codec})"
+        mode_label = f"ts-vaapi-full(from {video_codec})"
     else:
         # Software fallback: ultrafast + 720p cap.
         hw_pre     = []
