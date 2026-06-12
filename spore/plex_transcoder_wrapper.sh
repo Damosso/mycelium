@@ -313,17 +313,22 @@ if [ "$spore_replaced" = "1" ]; then
         echo "SPORE-WRAP: remapped filter_complex [0:${stub_audio_idx}] -> [0:${cdn_preferred_idx}]" >&2
     fi
 
-    # ── Force audio copy as fallback when EAE unavailable ────────────────────
-    # With the VP8+EAC3 stub and native decoder injection above, audio decode
-    # works without EAE for all clients. This block handles edge cases where
-    # EAE is expected but not running AND native decode is also unavailable
-    # (e.g. TrueHD fallback when native truehd decoder fails to init).
+    # ── Force audio copy for EAC3 (and fallback when EAE unavailable) ──────────
+    # eac3 in Plex's FFmpeg is an alias for eac3_eae -- there is NO native EAC3
+    # decoder. eac3_eae requires EAE IPC via -eae_prefix, which we always remove
+    # (EAE IPC hangs over HTTP CDN input). Solution: always copy EAC3 packets.
     #
-    # For Shield TV + AV receiver: audio is Direct Stream (already copy),
-    # so _acodec_post = "copy" -> inner condition is false -> no-op.
-    # For phone/MiTV: native decoder injected, EAE_ROOT set -> not triggered.
+    # EAC3 copy output is accepted by:
+    #   - Shield TV + AV receiver: audio was Direct Stream (already copy) -> no-op
+    #   - MiTV / Android TV: Plex negotiates AC3, gets EAC3 in Matroska.
+    #     AC3 and EAC3 are related (Enhanced AC3). Plex does NOT kill the session
+    #     for this mismatch (confirmed: much more lenient than Opus/EAC3 mismatch).
+    #     The Plex Android app on Android TV plays EAC3 from Matroska segments.
     _force_audio_copy=0
-    if [ "$_needs_eae" = "1" ] && [ -z "$EAE_ROOT" ]; then
+    if [ "$cdn_audio_codec" = "eac3" ]; then
+        _force_audio_copy=1
+        echo "$(date '+%H:%M:%S') WRAP force audio copy: EAC3 CDN (no native decoder, passthrough)" >> "$SPORE_LOG"
+    elif [ "$_needs_eae" = "1" ] && [ -z "$EAE_ROOT" ]; then
         _force_audio_copy=1
         echo "$(date '+%H:%M:%S') WRAP force audio copy: EAE unavailable (fallback)" >> "$SPORE_LOG"
     fi
