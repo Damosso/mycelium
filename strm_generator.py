@@ -872,16 +872,22 @@ def make_stub_mkv(title: str, quality: str | None = None,
             )
             next_num += 1
     else:
-        # EAC3 16ch placeholder: 16-channel EAC3 cannot be Direct Played on
-        # any device (HDMI/eARC max is 8ch), so Plex always invokes the
-        # external transcoder. Crucially, Plex starts EasyAudioEncoder (EAE)
-        # *before* spawning the transcoder when the stub declares EAC3 -- so
-        # EAE_ROOT is set in the transcoder environment. The wrapper can then
-        # let Plex's eac3_eae decoder work (EAE is running), and the real
-        # CDN EAC3 is decoded correctly via eac3_eae -> Opus transcoding.
+        # EAC3 5.1 (6ch) placeholder. Design goals:
+        #   1. Prevent Direct PLAY: video has no SPS/PPS so Plex can't verify
+        #      the HEVC profile -- video must be transcoded, wrapper is called.
+        #   2. Allow Direct Stream Audio: Plex sees EAC3 5.1 + client accepts
+        #      EAC3 in HLS (Shield TV / Android TV profile) -> Plex chooses
+        #      audio passthrough (-codec:1 copy). No EAE decode needed.
+        #      First HLS segment is produced instantly (video+audio copy).
+        #   3. Wrapper forces video copy (hevc_vaapi -> copy). Audio is already
+        #      copy. Shield TV plays HEVC + EAC3 5.1 via eARC to AV receiver.
+        #
+        # Why NOT 16ch: 16ch EAC3 forces Opus transcoding via EAE. EAE IPC
+        # latency makes the first segment too slow for Plex's startup timeout
+        # (~200ms), causing the session to be killed before any segments appear.
         tracks_data += _ebml_audio_track_entry(
             track_num=2, codec_mkv="A_EAC3", lang="und",
-            channels=16, sample_rate=48000.0, is_default=True,
+            channels=6, sample_rate=48000.0, is_default=True,
         )
         next_num = 3
 
