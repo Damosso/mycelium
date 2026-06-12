@@ -928,6 +928,13 @@ def _spore_stub_dir(strm_path: Path) -> Path:
         rel = strm_path.parent.relative_to(media_root)
         return spore_root / rel
     except ValueError:
+        # strm_path is not under MEDIA_PATH (relative path or different prefix).
+        # Try to preserve the movies/ or series/ subdir from the path components.
+        parts = strm_path.parts
+        for anchor in ("movies", "series"):
+            if anchor in parts:
+                idx = parts.index(anchor)
+                return spore_root / Path(*parts[idx:-1])
         return spore_root / strm_path.parent.name
 
 
@@ -1088,6 +1095,7 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
                 audio_tracks=None,
                 subtitle_tracks=sub_tracks,
             )
+            stub_dir.mkdir(parents=True, exist_ok=True)
             mkv_path.write_bytes(stub)
             log.info("Spore: regenerated stub %s (quality=%s subs=%d)",
                      mkv_path.name, item.get("quality") or "?", len(sub_tracks or []))
