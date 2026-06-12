@@ -123,7 +123,9 @@ if [ "$spore_replaced" = "1" ]; then
     # OR the post-input args contain eac3_eae/truehd_eae as output encoder
     # (e.g. Shield TV requests EAC3 output for AV receiver via eARC).
     _needs_eae=0
-    case "$cdn_audio_codec" in eac3|truehd|eac3_eae|truehd_eae) _needs_eae=1 ;; esac
+    # eac3 is handled by the native ac3 decoder (see injection below), NOT EAE.
+    # Only truehd and explicit *_eae variants require the EAE watchfolder.
+    case "$cdn_audio_codec" in truehd|eac3_eae|truehd_eae) _needs_eae=1 ;; esac
     if [ "$_needs_eae" = "0" ]; then
         _after_i=0
         for _a in "${newargs[@]}"; do
@@ -202,8 +204,14 @@ if [ "$spore_replaced" = "1" ]; then
                     echo "SPORE-WRAP: skip decoder hint -codec:${ei} (output=copy, EAE not needed)" >&2
                     continue
                 fi
-                native_hints+=("-codec:${ei}" "$cdn_audio_codec")
-                echo "$(date '+%H:%M:%S') WRAP inject native decoder: -codec:${ei} ${cdn_audio_codec}" >> "$SPORE_LOG"
+                # Map eac3 -> ac3: Plex's 'eac3' decoder is aliased to eac3_eae
+                # (requires EAE watchfolder, unavailable for HTTP input).
+                # The native 'ac3' decoder handles the AC-3 core of EAC3 streams
+                # without EAE, allowing normal Opus/AAC transcoding to proceed.
+                _inject_codec="$cdn_audio_codec"
+                [ "$_inject_codec" = "eac3" ] && _inject_codec="ac3"
+                native_hints+=("-codec:${ei}" "$_inject_codec")
+                echo "$(date '+%H:%M:%S') WRAP inject native decoder: -codec:${ei} ${_inject_codec} (cdn=${cdn_audio_codec})" >> "$SPORE_LOG"
                 echo "SPORE-WRAP: injected native decoder: -codec:${ei} ${cdn_audio_codec}" >&2
             done
             newargs=("${front[@]}" "${native_hints[@]}" "${back[@]}")
