@@ -1005,12 +1005,34 @@ def _write_spore_stubs(strm_path: Path, token: str,
         return
 
     # Write stub .mkv
+    # Try to get a real duration from TMDB so Plex shows the correct runtime
+    # without needing to probe the CDN file first. Audio/subtitle tracks are
+    # still placeholder (EAC3 6ch) until the first Jellyfin play triggers
+    # catbox materialization and CDN probe -- that's correct catbox behaviour.
     if not mkv_path.exists():
         try:
-            stub = make_stub_mkv(title, quality)
+            duration_sec = 7200.0
+            try:
+                vi = db.get_virtual_item(token)
+                imdb_id = vi.get("imdb_id") if vi else None
+                if imdb_id:
+                    import tmdb as _tmdb
+                    season  = vi.get("season")
+                    episode = vi.get("episode")
+                    if season and episode:
+                        dur = _tmdb.get_episode_runtime_sec(imdb_id, season, episode)
+                    else:
+                        dur = _tmdb.get_movie_runtime_sec(imdb_id)
+                    if dur and dur > 60:
+                        duration_sec = dur
+                        log.debug("Spore: TMDB duration %.0fs for %s", duration_sec, title)
+            except Exception as _e:
+                log.debug("Spore: TMDB duration lookup failed for %s: %s", title, _e)
+
+            stub = make_stub_mkv(title, quality, duration_sec=duration_sec)
             mkv_path.write_bytes(stub)
-            log.debug("Spore: wrote stub MKV %s (%d bytes, quality=%s audio=A_EAC3-6ch)",
-                      mkv_path.name, len(stub), quality or "?")
+            log.debug("Spore: wrote stub MKV %s (%d bytes, quality=%s dur=%.0fs)",
+                      mkv_path.name, len(stub), quality or "?", duration_sec)
         except Exception as exc:
             log.warning("Spore: could not write stub MKV %s: %s", mkv_path, exc)
             return
@@ -1150,18 +1172,18 @@ def regenerate_spore_stubs(token: str | None = None) -> dict:
     return {"total": total, "regenerated": regenerated, "skipped": skipped, "errors": errors}
 
 
-_PROBE_PRELOAD_BATCH = 10   # max new-to-TorBox preloads queued per run
-
-
 def probe_pending_stubs() -> dict:
     """Background job: probe CDN files for Plex stubs that have no track info yet.
 
-    Pass 1 (fast): items already in TorBox library -- probe directly, no add needed.
-    Pass 2 (slow): items not yet in TorBox -- queue up to _PROBE_PRELOAD_BATCH for
-      _preload_torrent (adds to TorBox, waits for ready, probes). Runs over multiple
-      scheduler ticks so the full library is covered without hammering TorBox.
+    Only probes items already present in TorBox library -- no torrents are added.
+    This preserves the catbox lazy principle: TorBox is only touched when a user
+    plays something in Jellyfin (catbox materialization) or CATBOX_PRELOAD runs.
 
-    Uses build_fsh=False so no 32MB download per file -- just ffprobe for metadata.
+    Duration is set via TMDB at stub creation time (_write_spore_stubs), so no
+    probe is needed just for runtime. This job fills in real audio/sub tracks
+    for items that happen to still be cached in TorBox (e.g. recently played).
+
+    Uses build_fsh=False: just ffprobe, no 32MB download per file.
     Fast-start cache is built on first actual Plex play.
     """
     if not settings.get("SPORE_ENABLED", cfg.SPORE_ENABLED):
@@ -1183,15 +1205,13 @@ def probe_pending_stubs() -> dict:
         if h:
             by_hash.setdefault(h, []).append(item)
 
-    probed = skipped = queued_preload = errors = 0
-    missing_hashes: list[tuple[str, list[dict]]] = []   # not in TorBox yet
+    probed = skipped = errors = 0
 
-    # ── Pass 1: items already in TorBox -- probe immediately ─────────────────
     for info_hash, hash_items in by_hash.items():
         try:
             ready = torbox_mod.find_by_hash(info_hash)
             if not ready or not torbox_mod._is_ready(ready):
-                missing_hashes.append((info_hash, hash_items))
+                skipped += len(hash_items)
                 continue
 
             torrent_id = ready.get("id")
@@ -1242,34 +1262,9 @@ def probe_pending_stubs() -> dict:
             log.warning("Probe pending: error for hash %s: %s", info_hash, exc)
             errors += len(hash_items)
 
-    # ── Pass 2: items not yet in TorBox -- queue preload in batches ──────────
-    # _preload_torrent adds the torrent, waits for ready, fetches CDN URL and
-    # calls _preload_spore. _preload_semaphore caps concurrency at 3;
-    # _preload_add_lock rate-limits add_magnet to ~8/min.
-    for info_hash, hash_items in missing_hashes[:_PROBE_PRELOAD_BATCH]:
-        vi = hash_items[0]
-        magnet = vi.get("magnet")
-        title  = vi.get("title") or info_hash[:8]
-        if not magnet:
-            skipped += len(hash_items)
-            continue
-        threading.Thread(
-            target=_preload_torrent,
-            args=(info_hash, magnet, title),
-            daemon=True,
-        ).start()
-        queued_preload += 1
-        log.debug("Probe pending: queued preload for %s", title)
-
-    remaining = len(missing_hashes) - queued_preload
-    log.info(
-        "Probe pending done: probed=%d skipped=%d queued_preload=%d remaining=%d errors=%d",
-        probed, skipped, queued_preload, remaining, errors,
-    )
-    return {
-        "probed": probed, "skipped": skipped,
-        "queued_preload": queued_preload, "remaining": remaining, "errors": errors,
-    }
+    log.info("Probe pending done: probed=%d skipped=%d errors=%d",
+             probed, skipped, errors)
+    return {"probed": probed, "skipped": skipped, "errors": errors}
 
 
 def update_stub_from_probe(token: str, audio_streams: list[dict],
