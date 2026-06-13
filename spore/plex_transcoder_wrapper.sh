@@ -102,7 +102,7 @@ if [ "$spore_replaced" = "1" ]; then
     _past_i_aod=0
     for _idx in "${!newargs[@]}"; do
         [ "${newargs[$_idx]}" = "-i" ] && _past_i_aod=1 && continue
-        if [ "$_past_i_aod" = "1" ] && [[ "${newargs[$_idx]}" =~ ^-codec:([1-9][0-9]*)$ ]]; then
+        if [ "$_past_i_aod" = "1" ] && [[ "${newargs[$_idx]}" =~ ^-codec:([1-9][0-9]*)$ || "${newargs[$_idx]}" =~ ^-codec:[a-z]:[0-9]+$ ]]; then
             _audio_stream_idx="${BASH_REMATCH[1]}"
             [ "${newargs[$((_idx+1))]:-}" = "copy" ] && _audio_output_is_copy=1
             break
@@ -149,7 +149,8 @@ if [ "$spore_replaced" = "1" ]; then
             #   native decoder below as safety net.
             # For TRANSCODE (MiTV AC3 etc.): KEEP eac3_eae + -eae_prefix so EAE
             #   can decode EAC3. Only remove PCM hints (obsolete, never needed).
-            if [ "$idx" -lt "$i_pos" ] && [[ "$arg" =~ ^-codec:[0-9]+$ ]] && \
+            if [ "$idx" -lt "$i_pos" ] && \
+               { [[ "$arg" =~ ^-codec:[0-9]+$ ]] || [[ "$arg" =~ ^-codec:[a-z]:[0-9]+$ ]]; } && \
                [[ "$next_arg" =~ ^((eac3|truehd|dts_ma)_eae|pcm_s[0-9]+(le|be))$ ]]; then
                 # Always remove PCM hints. For EAE hints: only remove on copy mode.
                 _is_pcm=0
@@ -168,7 +169,7 @@ if [ "$spore_replaced" = "1" ]; then
             # Before -i: remove -eae_prefix ONLY when audio output is copy.
             # When transcoding (e.g. EAC3->AC3 for MiTV), -eae_prefix tells
             # eac3_eae which watchfolder to use. Removing it causes EAE timeout.
-            if [ "$idx" -lt "$i_pos" ] && [[ "$arg" =~ ^-eae_prefix:[0-9]+$ ]]; then
+            if [ "$idx" -lt "$i_pos" ] && { [[ "$arg" =~ ^-eae_prefix:[0-9]+$ ]] || [[ "$arg" =~ ^-eae_prefix:[a-z]:[0-9]+$ ]]; }; then
                 if [ "$_audio_output_is_copy" = "1" ]; then
                     skip_next=1
                     echo "$(date '+%H:%M:%S') WRAP removed -eae_prefix: $arg $next_arg (copy mode, no EAE)" >> "$SPORE_LOG"
@@ -340,7 +341,7 @@ if [ "$spore_replaced" = "1" ]; then
                 -fps_mode|-init_hw_device|-filter_hw_device)
                     _sk=1; continue ;;
                 -filter_complex)
-                    if [[ "$_n" == \[0:0\]* ]]; then
+                    if [[ "$_n" == \[0:0\]* ]] || [[ "$_n" == \[0:V:0\]* ]]; then
                         _vhl=$(echo "$_n" | grep -oE '\[[0-9]+\]' | tail -1)
                         _sk=1
                         echo "$(date '+%H:%M:%S') WRAP removed video filter_complex (label=${_vhl})" >> "$SPORE_LOG"
@@ -433,7 +434,7 @@ if [ "$spore_replaced" = "1" ]; then
                 [ "$_a" = "-i" ] && _past_i3=1
                 case "$_a" in
                     -filter_complex)
-                        if [[ "$_n" == \[0:${_audio_stream_idx}\]* ]]; then
+                        if [[ "$_n" == \[0:${_audio_stream_idx}\]* ]] || [[ "$_n" == \[0:a:0\]* ]]; then
                             _ahl2=$(echo "$_n" | grep -oE '\[[0-9]+\]' | tail -1)
                             _sk3=1
                             echo "$(date '+%H:%M:%S') WRAP removed audio filter_complex (label=${_ahl2})" >> "$SPORE_LOG"
