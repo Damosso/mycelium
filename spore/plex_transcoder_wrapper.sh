@@ -20,25 +20,44 @@ newargs=()
 found_i=0
 spore_replaced=0
 spore_minfo=""
+_strm_tmp_minfo=""
 for a in "$@"; do
     if [ "$found_i" = "1" ]; then
         found_i=0
         if [[ "$a" == *.mkv ]]; then
+            # Stub MKV path: read .minfo sidecar next to the .mkv file
             minfo="${a%.mkv}.minfo"
             if [ -f "$minfo" ]; then
                 tok=$(grep "^token=" "$minfo" | head -1 | cut -d= -f2)
                 if [ -n "$tok" ]; then
-                    echo "SPORE-WRAP: -i $a -> http://127.0.0.1:8088/spore-stream/$tok" >&2
+                    echo "SPORE-WRAP: -i $a -> spore-stream/$tok" >&2
                     a="http://127.0.0.1:8088/spore-stream/$tok"
                     spore_replaced=1
                     spore_minfo="$minfo"
                 fi
             fi
+        elif [[ "$a" =~ /s(tream|pore-stream)/([a-f0-9]{8,}) ]]; then
+            # .strm file: Plex passes the URL directly as -i.
+            # Extract token, rewrite to spore-stream, fetch minfo from Mycelium API.
+            tok="${BASH_REMATCH[2]}"
+            echo "SPORE-WRAP: -i stream URL tok=$tok -> spore-stream/$tok" >&2
+            a="http://127.0.0.1:8088/spore-stream/$tok"
+            spore_replaced=1
+            # Fetch minfo data from Mycelium API into a temp file
+            _strm_tmp_minfo="/tmp/spore-minfo-$tok.txt"
+            curl -sf "http://127.0.0.1:8088/ui/api/spore-minfo/$tok" \
+                 -o "$_strm_tmp_minfo" 2>/dev/null \
+                 || echo "token=$tok" > "$_strm_tmp_minfo"
+            spore_minfo="$_strm_tmp_minfo"
+            echo "$(date '+%H:%M:%S') WRAP .strm input: token=$tok minfo fetched" >> "$SPORE_LOG"
         fi
     fi
     [ "$a" = "-i" ] && found_i=1
     newargs+=("$a")
 done
+
+# Clean up temp minfo file at exit
+[ -n "$_strm_tmp_minfo" ] && trap "rm -f '$_strm_tmp_minfo'" EXIT
 
 if [ "$spore_replaced" = "1" ]; then
     # ── Read .minfo options ────────────────────────────────────────────────────

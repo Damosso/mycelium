@@ -2488,6 +2488,28 @@ def ui_api_jellyfin_items():
                    items={iid: _jellyfin_item_cache.get(iid) for iid in want})
 
 
+@app.get("/ui/api/spore-minfo/<token>")
+def spore_minfo_api(token: str):
+    """Return .minfo sidecar data for a token as plain text key=value pairs.
+
+    Used by the Plex transcoder wrapper when playing .strm files (no .minfo
+    file path is known from the URL alone, so the wrapper fetches it here).
+    No auth required: only token=hex is returned, no secrets.
+    """
+    item = db.get_virtual_item(token)
+    if not item or not item.get("strm_path"):
+        return f"token={token}\n", 404, {"Content-Type": "text/plain"}
+    from pathlib import Path as _Path
+    strm_path = _Path(item["strm_path"])
+    minfo_path = strm_generator._spore_stub_dir(strm_path) / (strm_path.stem + ".minfo")
+    if minfo_path.exists():
+        try:
+            return minfo_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/plain"}
+        except Exception:
+            pass
+    return f"token={token}\n", 200, {"Content-Type": "text/plain"}
+
+
 @app.get("/ui/api/tmdb/find")
 @auth.require_auth
 def ui_api_tmdb_find():
