@@ -172,40 +172,49 @@ def fetch_streams(
     raw_streams = payload.get("streams", []) or []
     parsed = [s for s in (_to_stream(r, season) for r in raw_streams) if s is not None]
 
-    # --- FOOLPROOF YEAR FILTER ---
-    if media_type == "movie":
-        try:
-            import tmdb
-            import re
-            
-            # 1. Ask TMDB what year this IMDb ID actually belongs to
-            results = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
+    # --- UNIFIED FOOLPROOF YEAR FILTER ---
+    try:
+        import tmdb
+        import re
+        
+        # 1. Ask TMDB for the release/premiere year
+        results = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
+        expected_year = None
+        
+        if media_type == "movie":
             hits = results.get("movie_results") or []
             if hits and hits[0].get("release_date"):
                 expected_year = hits[0]["release_date"][:4]
                 
-                # 2. Filter the streams
-                filtered = []
-                year_regex = re.compile(r'(?<!\d)(?:19|20)\d{2}(?!\d)')
+        elif media_type in ("series", "tv"):
+            hits = results.get("tv_results") or []
+            if hits and hits[0].get("first_air_date"):
+                expected_year = hits[0]["first_air_date"][:4]
+
+        # 2. Filter the streams if we successfully found an expected year
+        if expected_year:
+            filtered = []
+            year_regex = re.compile(r'(?<!\d)(?:19|20)\d{2}(?!\d)')
+            
+            for s in parsed:
+                # Extract any 4-digit years found in the torrent name
+                found_years = year_regex.findall(f"{s.name} {s.title}")
                 
-                for s in parsed:
-                    # Extract any 4-digit years found in the torrent name
-                    found_years = year_regex.findall(f"{s.name} {s.title}")
+                # Keep it if: no year is mentioned, OR the expected year is in the title
+                if not found_years or expected_year in found_years:
+                    filtered.append(s)
+                else:
+                    log.info("Dropped stream '%s' - Wrong year (Expected %s, found %s)", 
+                             s.title, expected_year, found_years)
                     
-                    # Keep it if: no year is mentioned, OR the expected year is in the title
-                    if not found_years or expected_year in found_years:
-                        filtered.append(s)
-                    else:
-                        log.info("Dropped stream '%s' - Wrong year (Expected %s, found %s)", s.title, expected_year, found_years)
-                        
-                parsed = filtered
-        except Exception as exc:
-            log.warning("Year filter failed: %s", exc)
-    # -----------------------------
+            parsed = filtered
+            
+    except Exception as exc:
+        log.warning("Year filter failed: %s", exc)
+    # -------------------------------------
 
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
     return parsed
-
 
 def _quality_rank(stream: TorrentioStream, quality_pref: list[str]) -> int:
     try:
