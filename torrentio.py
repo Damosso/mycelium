@@ -172,27 +172,47 @@ def fetch_streams(
     raw_streams = payload.get("streams", []) or []
     parsed = [s for s in (_to_stream(r, season) for r in raw_streams) if s is not None]
 
-    # --- UNIFIED FOOLPROOF YEAR FILTER ---
+    # --- UNIFIED FOOLPROOF YEAR FILTER (MULTI-YEAR SUPPORT) ---
     try:
         import tmdb
         import re
         
-        # 1. Ask TMDB for the release/premiere year
         results = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
-        expected_year = None
+        valid_years = set()
         
         if media_type == "movie":
             hits = results.get("movie_results") or []
             if hits and hits[0].get("release_date"):
-                expected_year = hits[0]["release_date"][:4]
+                valid_years.add(hits[0]["release_date"][:4])
                 
         elif media_type in ("series", "tv"):
             hits = results.get("tv_results") or []
-            if hits and hits[0].get("first_air_date"):
-                expected_year = hits[0]["first_air_date"][:4]
+            if hits:
+                show_info = hits[0]
+                
+                # 1. Add Premiere Year (Crucial for separating reboots)
+                if show_info.get("first_air_date"):
+                    valid_years.add(show_info["first_air_date"][:4])
+                
+                # 2. Add Specific Season/Episode Year
+                tmdb_id = show_info.get("id")
+                if tmdb_id and season:
+                    try:
+                        # Pull the season data to get its specific air year
+                        season_data = tmdb._get(f"/tv/{tmdb_id}/season/{season}") or {}
+                        if season_data.get("air_date"):
+                            valid_years.add(season_data["air_date"][:4])
+                        
+                        # Check the specific episode to catch New Year crossovers
+                        if episode and season_data.get("episodes"):
+                            ep_data = next((e for e in season_data["episodes"] if e.get("episode_number") == episode), {})
+                            if ep_data.get("air_date"):
+                                valid_years.add(ep_data["air_date"][:4])
+                    except Exception:
+                        pass
 
-        # 2. Filter the streams if we successfully found an expected year
-        if expected_year:
+        # 3. Filter the streams if we found valid years
+        if valid_years:
             filtered = []
             year_regex = re.compile(r'(?<!\d)(?:19|20)\d{2}(?!\d)')
             
@@ -200,28 +220,21 @@ def fetch_streams(
                 # Extract any 4-digit years found in the torrent name
                 found_years = year_regex.findall(f"{s.name} {s.title}")
                 
-                # Keep it if: no year is mentioned, OR the expected year is in the title
-                if not found_years or expected_year in found_years:
+                # Keep if: No year found OR at least one found year matches a valid year
+                if not found_years or any(y in valid_years for y in found_years):
                     filtered.append(s)
                 else:
-                    log.info("Dropped stream '%s' - Wrong year (Expected %s, found %s)", 
-                             s.title, expected_year, found_years)
+                    log.info("Dropped stream '%s' - Wrong year (Expected one of %s, found %s)", 
+                             s.title, valid_years, found_years)
                     
             parsed = filtered
             
     except Exception as exc:
         log.warning("Year filter failed: %s", exc)
-    # -------------------------------------
+    # ----------------------------------------------------------
 
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
     return parsed
-
-def _quality_rank(stream: TorrentioStream, quality_pref: list[str]) -> int:
-    try:
-        return quality_pref.index(stream.quality)
-    except ValueError:
-        return len(quality_pref) + 1
-
 
 def rank_streams(
     streams: list[TorrentioStream],
