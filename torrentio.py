@@ -236,6 +236,11 @@ def fetch_streams(
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
     return parsed
 
+def _quality_rank(stream: TorrentioStream, quality_pref: list[str]) -> int:
+    try:
+        return quality_pref.index(stream.quality)
+    except ValueError:
+        return len(quality_pref) + 1
 
 def rank_streams(
     streams: list[TorrentioStream],
@@ -351,9 +356,9 @@ def rank_streams(
             _quality_rank(s, quality_pref),
             _lang_score(s),
             0 if prefer_webdl and _WEBDL_RE.search(blob) else 1,
+            -s.size_gb,          # <--- PRIORITY 5: Largest file size first (Highest Bitrate)
             0 if prefer_hevc and _HEVC_RE.search(blob) else 1,
-            -s.seeders,
-            s.size_gb,
+            -s.seeders,          # <--- PRIORITY 7: Fall back to seeders as a tie-breaker
         )
 
     candidates.sort(key=sort_key)
