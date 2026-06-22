@@ -296,9 +296,9 @@ def rank_streams(
             _quality_rank(s, quality_pref),
             _lang_score(s),
             0 if prefer_webdl and _WEBDL_RE.search(blob) else 1,
+            -s.size_gb,          # <--- PRIORITY 5: Largest file size first (Highest Bitrate)
             0 if prefer_hevc and _HEVC_RE.search(blob) else 1,
-            -s.seeders,
-            s.size_gb,
+            -s.seeders,          # <--- PRIORITY 7: Fall back to seeders as a tie-breaker
         )
 
     candidates.sort(key=sort_key)
