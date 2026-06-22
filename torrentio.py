@@ -172,7 +172,7 @@ def fetch_streams(
     raw_streams = payload.get("streams", []) or []
     parsed = [s for s in (_to_stream(r, season) for r in raw_streams) if s is not None]
 
-    # --- UNIFIED FOOLPROOF YEAR FILTER (MULTI-YEAR SUPPORT) ---
+    # --- UNIFIED FOOLPROOF YEAR FILTER (MULTI-YEAR SUPPORT + QUALITY IGNORER) ---
     try:
         import tmdb
         import re
@@ -180,30 +180,38 @@ def fetch_streams(
         results = tmdb._get(f"/find/{imdb_id}", params={"external_source": "imdb_id"}) or {}
         valid_years = set()
         
+        # New Strict Regex: Ensures the year isn't touching letters like 'x' or 'p'
+        year_regex = re.compile(r'(?<![a-zA-Z0-9])(?:19|20)\d{2}(?![a-zA-Z0-9])')
+        
         if media_type == "movie":
             hits = results.get("movie_results") or []
-            if hits and hits[0].get("release_date"):
-                valid_years.add(hits[0]["release_date"][:4])
+            if hits:
+                if hits[0].get("release_date"):
+                    valid_years.add(hits[0]["release_date"][:4])
+                if hits[0].get("title"):
+                    valid_years.update(year_regex.findall(hits[0]["title"]))
                 
         elif media_type in ("series", "tv"):
             hits = results.get("tv_results") or []
             if hits:
                 show_info = hits[0]
                 
-                # 1. Add Premiere Year (Crucial for separating reboots)
+                # 1. Add Premiere Year
                 if show_info.get("first_air_date"):
                     valid_years.add(show_info["first_air_date"][:4])
                 
-                # 2. Add Specific Season/Episode Year
+                # 2. Add Title Years (e.g. to whitelist a show actually named "1923")
+                if show_info.get("name"):
+                    valid_years.update(year_regex.findall(show_info["name"]))
+                
+                # 3. Add Specific Season/Episode Year
                 tmdb_id = show_info.get("id")
                 if tmdb_id and season:
                     try:
-                        # Pull the season data to get its specific air year
                         season_data = tmdb._get(f"/tv/{tmdb_id}/season/{season}") or {}
                         if season_data.get("air_date"):
                             valid_years.add(season_data["air_date"][:4])
                         
-                        # Check the specific episode to catch New Year crossovers
                         if episode and season_data.get("episodes"):
                             ep_data = next((e for e in season_data["episodes"] if e.get("episode_number") == episode), {})
                             if ep_data.get("air_date"):
@@ -211,10 +219,9 @@ def fetch_streams(
                     except Exception:
                         pass
 
-        # 3. Filter the streams if we found valid years
+        # 4. Filter the streams
         if valid_years:
             filtered = []
-            year_regex = re.compile(r'(?<!\d)(?:19|20)\d{2}(?!\d)')
             
             for s in parsed:
                 # Extract any 4-digit years found in the torrent name
@@ -231,16 +238,18 @@ def fetch_streams(
             
     except Exception as exc:
         log.warning("Year filter failed: %s", exc)
-    # ----------------------------------------------------------
+    # ----------------------------------------------------------------------------
 
     log.info("Torrentio returned %d streams (%d parsed)", len(raw_streams), len(parsed))
     return parsed
+
 
 def _quality_rank(stream: TorrentioStream, quality_pref: list[str]) -> int:
     try:
         return quality_pref.index(stream.quality)
     except ValueError:
         return len(quality_pref) + 1
+
 
 def rank_streams(
     streams: list[TorrentioStream],
