@@ -118,6 +118,22 @@ def _parse_info(torrent_name: str, file_name: str) -> dict | None:
             season = int(ep_m.group(1))
             episode = int(ep_m.group(2))
             title = _safe(_strip_junk(source[:ep_m.start()]).strip())
+
+            # --- FOOLPROOF TMDB FALLBACK ---
+            import re
+            imdb_match = re.search(r'(tt\d{7,})', title, re.IGNORECASE)
+            if imdb_match:
+                found_id = imdb_match.group(1).lower()
+                try:
+                    import tmdb
+                    data = tmdb._get(f"/find/{found_id}", params={"external_source": "imdb_id"}) or {}
+                    hits = data.get("tv_results") or []
+                    if hits and hits[0].get("name"):
+                        title = _safe(hits[0]["name"])
+                except Exception:
+                    pass
+            # -------------------------------
+
             return {'type': 'episode', 'title': title or 'Unknown', 'season': season, 'episode': episode}
 
     # Movie: find year
@@ -252,9 +268,20 @@ def _write_nfo(strm_path: Path, imdb_id: str | None, tmdb_id: int | None = None,
     nfo_path = nfo_path or strm_path.with_suffix(".nfo")
     if nfo_path.exists():
         return
-    m = _YEAR_RE.search(strm_path.parent.name)
+
+    # --- FIX: LOOK AT THE CORRECT FOLDER LEVEL ---
+    if media_type == "series":
+        # strm_path is series/Show/Season XX/Episode.strm
+        # We need the parent of the parent ("Show")
+        folder_name = strm_path.parent.parent.name
+    else:
+        # Movies just need their direct parent folder
+        folder_name = strm_path.parent.name
+
+    m = _YEAR_RE.search(folder_name)
     year = int(m.group(1)) if m else None
-    title = _YEAR_RE.sub("", strm_path.parent.name).replace("()", "").strip() if m else strm_path.parent.name
+    title = _YEAR_RE.sub("", folder_name).replace("()", "").strip() if m else folder_name
+    # ---------------------------------------------
 
     fileinfo = _fileinfo_xml(quality)
 
@@ -781,7 +808,6 @@ def create_lazy_movie_strm(info_hash: str, magnet: str, title: str,
             ).start()
     return written
 
-
 def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
                                season: int, episode: int,
                                imdb_id: str | None = None,
@@ -789,15 +815,27 @@ def create_lazy_episode_strm(info_hash: str, magnet: str, title: str,
                                source: str | None = None,
                                size_gb: float | None = None,
                                preload_first: bool = False) -> bool:
-    """Write a Catbox virtual episode .strm WITHOUT adding to TorBox.
-    For season packs: multiple episodes share the same info_hash/magnet;
-    catbox.materialize picks the right file by SxxExx at playback time.
-    Atomically writes tvshow.nfo and series poster/fanart on first episode.
-    Returns True if a new .strm was written."""
+    """Write a Catbox virtual episode .strm WITHOUT adding to TorBox."""
     import catbox
     safe_title = _safe(title)
+
+    # --- FOOLPROOF TMDB FALLBACK ---
+    import re
+    if re.search(r'(tt\d{7,})', safe_title, re.IGNORECASE):
+        use_id = imdb_id or re.search(r'(tt\d{7,})', safe_title, re.IGNORECASE).group(1)
+        try:
+            import tmdb
+            data = tmdb._get(f"/find/{use_id}", params={"external_source": "imdb_id"}) or {}
+            hits = data.get("tv_results") or []
+            if hits and hits[0].get("name"):
+                safe_title = _safe(hits[0]["name"])
+        except Exception:
+            pass
+    # -------------------------------
+
     if not safe_title:
         return False
+
     season_dir = f"Season {season:02d}"
     ep_name = f"{safe_title} S{season:02d}E{episode:02d}"
     path = Path(MEDIA_PATH) / "series" / safe_title / season_dir / f"{ep_name}.strm"
